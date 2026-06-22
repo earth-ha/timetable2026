@@ -36,7 +36,7 @@
             social:    { name: '사회(역사)', g1: 3, g2: 2, g3: 4, specials: [CAREER(1, 'social')], teacherCount: 5, memo: '' },
             ethics:    { name: '도덕', g1: 3, g2: 0, g3: 2, specials: [CAREER(2, 'ethics')], teacherCount: 3, memo: '' },
             math:      { name: '수학', g1: 4, g2: 4, g3: 3, specials: [CAREER(1, 'math')], teacherCount: 6, memo: '' },
-            science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER(1, 'science')], teacherCount: 6, names: ['하일민', '이황재', '이세형', '이현재', '강근구', '정수호'], memo: '' },
+            science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER(1, 'science')], teacherCount: 6, names: ['', '', '', '', '', ''], memo: '' },
             tech_home: { name: '기술·가정', g1: 2, g2: 2, g3: 3, specials: [CAREER(3, 'tech_home')], teacherCount: 4, memo: '' },
             info:      { name: '정보', g1: 0, g2: 2, g3: 0, specials: [], teacherCount: 1, memo: '' },
             pe:        { name: '체육', g1: 3, g2: 3, g3: 3, specials: [CAREER(1, 'pe')], teacherCount: 5, memo: '' },
@@ -59,9 +59,8 @@
         const newId = (p) => `${p}-${Date.now()}-${uid++}`;
 
         function buildTeachers(key, s) {
-            const ids = key === 'science' ? ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'] : null;
             const out = [];
-            for (let i = 0; i < (s.teacherCount || 1); i++) out.push({ id: ids ? ids[i] : newId('t'), name: s.names ? s.names[i] : '' });
+            for (let i = 0; i < (s.teacherCount || 1); i++) out.push({ id: newId('t'), name: s.names ? s.names[i] : '' });
             return out;
         }
         function buildInitial() {
@@ -93,6 +92,7 @@
             const [confirmDel, setConfirmDel] = useState(null);     
             const [confirmSubDel, setConfirmSubDel] = useState(false);
             const [toast, setToast] = useState('');
+            const [mobileEditCell, setMobileEditCell] = useState(null); 
 
             const allocRef = useRef({});
             const selRef = useRef(null);
@@ -204,56 +204,54 @@
                 setSel(extend ? { a: sx.a, f: { r, c } } : { a: { r, c }, f: { r, c } });
             };
 
+            const isMobileDevice = () => {
+                return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            };
+
             const onCellDown = (e, r, c) => {
                 if (printMode) return;
-                e.preventDefault();
+                
+                if (isMobileDevice()) {
+                    setSel({ a: { r, c }, f: { r, c } });
+                    const targetTeacher = teachers[r];
+                    const targetCol = visibleColumns[c];
+                    const currentVal = alloc[targetTeacher.id]?.[targetCol.id] || 0;
+                    setMobileEditCell({ r, c, teacherId: targetTeacher.id, teacherName: targetTeacher.name || `교사${r+1}`, colId: targetCol.id, colLabel: targetCol.label, val: currentVal });
+                    return;
+                }
+
+                e.preventDefault(); 
                 if (gridRef.current) gridRef.current.focus();
                 commitEdit();
                 if (e.shiftKey && selRef.current) setSel({ a: selRef.current.a, f: { r, c } });
                 else setSel({ a: { r, c }, f: { r, c } });
                 selectingRef.current = true;
             };
+
             const onCellEnter = (r, c) => {
-                if (selectingRef.current) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
+                if (selectingRef.current && !isMobileDevice()) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
             };
 
             useEffect(() => {
                 const up = () => { selectingRef.current = false; };
                 window.addEventListener('mouseup', up);
-                return () => window.removeEventListener('mouseup', up);
+                window.addEventListener('mouseleave', up); 
+                return () => {
+                    window.removeEventListener('mouseup', up);
+                    window.removeEventListener('mouseleave', up);
+                };
             }, []);
 
-            useEffect(() => {
-                const onKey = (e) => {
-                    const tag = e.target.tagName;
-                    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-                    if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
-                        e.preventDefault(); commitEdit(); (e.key.toLowerCase() === 'z' ? undo : redo)(); return;
-                    }
-                    if (!selRef.current) return;
-                    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); typeChar(e.key); return; }
-                    if (e.key === '-') { e.preventDefault(); typeChar('-'); return; }
-                    if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
-                    if (e.key === 'Delete') { e.preventDefault(); clearSel(); return; }
-                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); moveActive(1, 0); return; }
-                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
-                    if (e.key === 'Tab') { e.preventDefault(); commitEdit(); moveActive(0, e.shiftKey ? -1 : 1); return; }
-                    if (e.key.startsWith('Arrow')) {
-                        e.preventDefault(); commitEdit();
-                        const map = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-                        const [dr, dc] = map[e.key]; moveActive(dr, dc, e.shiftKey);
-                    }
-                };
-                window.addEventListener('keydown', onKey);
-                return () => window.removeEventListener('keydown', onKey);
-            }, [hi, history, teachers, visibleColumns]);
-
-            useEffect(() => {
-                if (focusTeacher.current && teacherRefs.current[focusTeacher.current]) {
-                    teacherRefs.current[focusTeacher.current].focus();
-                    focusTeacher.current = null;
-                }
-            }, [teachers]);
+            const handleMobileValueSubmit = (val) => {
+                if (!mobileEditCell) return;
+                const { teacherId, colId } = mobileEditCell;
+                const nextAlloc = { ...alloc };
+                nextAlloc[teacherId] = { ...(nextAlloc[teacherId] || {}), [colId]: parseInt(val, 10) || 0 };
+                setAllocLive(nextAlloc);
+                pushHistory();
+                setMobileEditCell(null);
+                flash('배정 시수가 반영되었습니다.');
+            };
 
             const renameTeacher = (id, name) => setTable(t => ({ ...t, teachers: t.teachers.map(x => x.id === id ? { ...x, name } : x) }));
             const addTeacher = () => {
@@ -296,18 +294,14 @@
             const colTotal = (cid) => teachers.reduce((s, t) => s + (alloc[t.id]?.[cid] || 0), 0);
             const grand = teachers.reduce((s, t) => s + teacherTotal(t.id), 0);
             
-            // 순수 시수 합산 공식 적용 완료
             const targetTotalCalculated = useMemo(() => {
-    if (!activeKey) return 0;
-    // 1) 기타 지원시수들의 순수 합계를 구합니다.
-    const baseSpecials = (subject.specials || []).reduce((sum, sp) => sum + (sp.required || 0), 0);
-    
-    // 🟢 2) 중학교 기준: (학년별 주간 시수 × 총 학급 수)를 모두 곱하고 더한 뒤, 기타 시수까지 최종 합산합니다!
-    return (Number(subject.g1) * Number(classCounts.G1)) + 
-           (Number(subject.g2) * Number(classCounts.G2)) + 
-           (Number(subject.g3) * Number(classCounts.G3)) + 
-           baseSpecials;
-}, [subject, classCounts, activeKey]);
+                if (!activeKey) return 0;
+                const baseSpecials = (subject.specials || []).reduce((sum, sp) => sum + (sp.required || 0), 0);
+                return (Number(subject.g1) * Number(classCounts.G1)) + 
+                       (Number(subject.g2) * Number(classCounts.G2)) + 
+                       (Number(subject.g3) * Number(classCounts.G3)) + 
+                       baseSpecials;
+            }, [subject, classCounts, activeKey]);
 
             const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 1600); };
 
@@ -451,13 +445,6 @@
                             </div>
                         )}
 
-                        {!activeKey && (
-                            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 text-center text-slate-400 font-medium">
-                                <div className="text-4xl mb-3">☝️</div>
-                                위의 목록 버튼에서 배정할 <b className="text-slate-700 font-black">교과목 단추를 선택</b>하거나 새로운 과목을 추가해 주세요!
-                            </div>
-                        )}
-
                         {activeKey && (
                             <div class="print-clean bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-2 sm:p-4">
                                 {!printMode && (
@@ -470,9 +457,8 @@
                                                     return <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${active ? `${solid} text-white shadow` : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>{t.label}</button>;
                                                 })}
                                             </div>
-                                            {/* 🎯 사용성 피드백: 배정 현황 시수를 버튼 단추 바로 옆(표 작성 영역 최상단)으로 전진 배치 완료 */}
                                             <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 px-3 py-1.5 rounded-lg text-sm font-black flex items-center shadow-sm">
-                                                ⏳ {subject.name} 배정 현황 :&nbsp;<span className="text-indigo-600">{grand}</span>&nbsp;/ {targetTotalCalculated}h
+                                                ⏳ {subject.name} 총 배정량 :&nbsp;<span className="text-indigo-600">{grand}</span>&nbsp;/ {targetTotalCalculated}h
                                             </div>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-1.5 self-end lg:self-auto">
@@ -488,10 +474,11 @@
 
                                 {!printMode && (
                                     <div className="mb-3 p-3 bg-indigo-50/40 rounded-xl border border-indigo-100 text-sm text-indigo-900 max-w-xl no-print">
-                                        <b className="text-indigo-900 block mb-1 text-base">💡 스마트 단축키 및 배정 팁</b>
+                                        <b className="text-indigo-900 block mb-1 text-base">💡 스마트 안내 및 배정 팁</b>
                                         <ul className="list-disc list-inside space-y-0.5 text-slate-600">
-                                            <li>마우스로 셀을 <b class="text-indigo-700">드래그해 넓게 범위를 잡고</b> 숫자를 누르면 일괄 입력됩니다.</li>
-                                            <li>키보드 <b class="text-slate-800">방향키</b>로 셀 이동  ·  <b class="text-slate-800">Enter</b> 아래로 이동  ·  <b class="text-slate-800">Delete / Backspace</b> 시수 삭제</li>
+                                            <li class="hidden sm:list-item">PC 환경: 마우스로 셀을 <b class="text-indigo-700">드래그해 범위를 잡고</b> 숫자를 누르면 일괄 입력됩니다.</li>
+                                            <li class="block sm:hidden text-amber-700 font-bold">📱 모바일 환경: 입력할 칸을 손가락으로 콕 누르면 숫자 입력기 팝업창이 뜹니다.</li>
+                                            <li class="hidden sm:list-item">키보드 방향키 이동  ·  Enter 아래로 이동  ·  Delete 시수 삭제</li>
                                         </ul>
                                     </div>
                                 )}
@@ -511,7 +498,6 @@
                                         <table className="w-full border-collapse text-left table-fixed">
                                             <thead>
                                                 <tr className="border-b border-slate-200 bg-slate-50/70">
-                                                    {/* 📝 사용성 피드백: '大구분' 문구를 깔끔하게 '구분'으로 변경 완료 */}
                                                     <th className="p-2 text-sm font-extrabold text-slate-500 sticky left-0 bg-slate-50 border-r border-slate-200 w-[150px] z-20">구분</th>
                                                     {headerGroups.map((g, i) => {
                                                         const m = GRADE_META[g.gid];
@@ -569,7 +555,7 @@
                                                 {!printMode && (
                                                     <tr className="border-b border-slate-100 no-print">
                                                         <td className="p-2 sticky left-0 bg-white border-r border-slate-200 z-10">
-                                                            <button onClick={addTeacher} className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold transition-colors">＋ 명단 추가</button>
+                                                            <button onClick={addTeacher} className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold transition-colors">＋ 교사 추가</button>
                                                         </td>
                                                         <td colSpan={visibleColumns.length} className="bg-slate-50/50"></td>
                                                     </tr>
@@ -609,6 +595,32 @@
                             </div>
                         )}
                     </main>
+
+                    {mobileEditCell && (
+                        <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-end justify-center p-0 sm:p-4 no-print" onClick={() => setMobileEditCell(null)}>
+                            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
+                                    <div>
+                                        <h4 className="text-base font-black text-slate-900">📱 모바일 시수 직접 입력</h4>
+                                        <p className="text-xs text-slate-400 mt-0.5">{mobileEditCell.teacherName} ➔ {mobileEditCell.colLabel}</p>
+                                    </div>
+                                    <button onClick={() => setMobileEditCell(null)} className="text-slate-400 font-bold text-lg px-2">✕</button>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 mb-4">
+                                    {[0, 1, 2, 3, 4, 5, 6, 7].map(num => (
+                                        <button key={num} onClick={() => handleMobileValueSubmit(num)}
+                                            className={`py-3 rounded-xl text-lg font-black border transition-all ${mobileEditCell.val === num ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 active:bg-slate-200'}`}>
+                                            {num === 0 ? '지우기' : `${num}h`}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => handleMobileValueSubmit(0)} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl text-sm font-bold border border-slate-200">초기화(0)</button>
+                                    <button onClick={() => setMobileEditCell(null)} className="flex-1 bg-slate-800 text-white py-3 rounded-xl text-sm font-bold shadow-md">닫기</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {confirmDel && (
                         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4 no-print" onClick={() => setConfirmDel(null)}>
