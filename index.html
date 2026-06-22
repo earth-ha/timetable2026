@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스마트 시수 플래너</title>
+    <title>시수배정 계산 프로그램_v1.0</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
@@ -75,6 +75,9 @@
 
         const numShow = (n) => (n === 0 || n === undefined || n === null ? '' : String(n));
 
+        // 터치 지원 노트북을 모바일로 오인하지 않도록 화면 폭과 포인터 유형을 함께 확인합니다.
+        const isMobileDevice = () => window.matchMedia('(max-width: 767px) and (pointer: coarse)').matches;
+
         function App() {
             const init = useRef(buildInitial());
             const [subjects, setSubjects] = useState(init.current.subjects);
@@ -103,6 +106,45 @@
             const fileInputRef = useRef(null);
             const teacherRefs = useRef({});
             const focusTeacher = useRef(null);
+
+            const flash = (message) => {
+                setToast(message);
+                window.clearTimeout(flash.timer);
+                flash.timer = window.setTimeout(() => setToast(''), 2200);
+            };
+
+            const exportToJSONFile = () => {
+                try {
+                    const payload = {
+                        app: 'smart-hours-planner',
+                        version: 2,
+                        savedAt: new Date().toISOString(),
+                        subjects, order, classCounts, tables, activeKey
+                    };
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `스마트_시수_플래너_백업_${new Date().toISOString().slice(0, 10)}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                    flash('데이터 백업 파일을 저장했습니다.');
+                } catch (err) {
+                    console.error(err);
+                    alert('백업 파일 생성 중 오류가 발생했습니다.');
+                }
+            };
+
+            const triggerPrint = () => {
+                const wasPrintMode = printMode;
+                if (!wasPrintMode) setPrintMode(true);
+                window.setTimeout(() => {
+                    window.print();
+                    if (!wasPrintMode) setPrintMode(false);
+                }, 150);
+            };
 
             const subject = subjects[activeKey] || { name: '', g1: 0, g2: 0, g3: 0, specials: [], memo: '' };
             const table = tables[activeKey] || { teachers: [], alloc: {} };
@@ -329,29 +371,89 @@
             }, [subject, classCounts, activeKey]);
 
             const importFromJSONFile = (e) => {
-                const files = e.target.files;
-                if(!files || !files[0]) return;
-                
+                const file = e.target.files?.[0];
+                if (!file) return;
+
                 const fileReader = new FileReader();
-                fileReader.readAsText(files[0], "UTF-8");
                 fileReader.onload = (event) => {
                     try {
-                        const parsed = JSON.parse(event.target.result);
-                        if(parsed.subjects && parsed.tables && parsed.order) {
-                            setSubjects(parsed.subjects);
-                            setOrder(parsed.order);
-                            setClassCounts(parsed.classCounts || { G1: 11, G2: 11, G3: 11 });
-                            setTables(parsed.tables);
-                            setActiveKey(parsed.order[0] || '');
-                            flash('데이터를 성공적으로 복구했습니다!');
-                        } else {
-                            alert('올바른 배정표 백업 파일이 아닙니다.');
+                        // 일부 편집기에서 붙는 BOM을 제거하고, data 속성으로 감싼 백업도 허용합니다.
+                        const text = String(event.target?.result || '').replace(/^\uFEFF/, '').trim();
+                        if (!text) throw new Error('빈 파일입니다.');
+
+                        const raw = JSON.parse(text);
+                        const parsed = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+
+                        if (!parsed || typeof parsed.subjects !== 'object' ||
+                            typeof parsed.tables !== 'object' || !Array.isArray(parsed.order)) {
+                            throw new Error('올바른 시수 플래너 백업 형식이 아닙니다.');
                         }
+
+                        const validOrder = parsed.order.filter(k => parsed.subjects[k] && parsed.tables[k]);
+                        if (validOrder.length === 0) throw new Error('복구할 교과목 데이터가 없습니다.');
+
+                        const normalizedSubjects = {};
+                        const normalizedTables = {};
+
+                        validOrder.forEach((key) => {
+                            const sub = parsed.subjects[key] || {};
+                            normalizedSubjects[key] = {
+                                name: String(sub.name || '이름 없는 교과목'),
+                                g1: Number(sub.g1) || 0,
+                                g2: Number(sub.g2) || 0,
+                                g3: Number(sub.g3) || 0,
+                                specials: Array.isArray(sub.specials)
+                                    ? sub.specials.map((sp, i) => ({
+                                        id: String(sp?.id || `${key}-special-${i}`),
+                                        name: String(sp?.name || '기타시수'),
+                                        required: Number(sp?.required) || 0
+                                    }))
+                                    : [],
+                                memo: String(sub.memo || '')
+                            };
+
+                            const oldTable = parsed.tables[key] || {};
+                            const oldTeachers = Array.isArray(oldTable.teachers) ? oldTable.teachers : [];
+                            const teachersSafe = oldTeachers.length
+                                ? oldTeachers.map((t, i) => ({
+                                    id: String(t?.id || `${key}-teacher-${i}`),
+                                    name: String(t?.name || '')
+                                }))
+                                : [{ id: `${key}-teacher-0`, name: '' }];
+
+                            normalizedTables[key] = {
+                                teachers: teachersSafe,
+                                alloc: oldTable.alloc && typeof oldTable.alloc === 'object' ? oldTable.alloc : {}
+                            };
+                        });
+
+                        const cc = parsed.classCounts || {};
+                        const normalizedCounts = {
+                            G1: Math.max(1, Math.min(20, Number(cc.G1) || 11)),
+                            G2: Math.max(1, Math.min(20, Number(cc.G2) || 11)),
+                            G3: Math.max(1, Math.min(20, Number(cc.G3) || 11))
+                        };
+
+                        setSubjects(normalizedSubjects);
+                        setOrder(validOrder);
+                        setClassCounts(normalizedCounts);
+                        setTables(normalizedTables);
+                        setActiveKey(validOrder.includes(parsed.activeKey) ? parsed.activeKey : validOrder[0]);
+                        setSel(null);
+                        setTab('all');
+                        flash('데이터를 성공적으로 복구했습니다!');
                     } catch (err) {
-                        alert('파일 읽기 중 오류가 발생했습니다.');
+                        console.error('백업 로드 오류:', err);
+                        alert(`백업 파일을 불러오지 못했습니다.\n${err.message || '파일 형식을 확인해 주세요.'}`);
+                    } finally {
+                        if (fileInputRef.current) fileInputRef.current.value = '';
                     }
+                };
+                fileReader.onerror = () => {
+                    alert('파일을 읽을 수 없습니다. 다른 백업 파일로 다시 시도해 주세요.');
                     if (fileInputRef.current) fileInputRef.current.value = '';
                 };
+                fileReader.readAsText(file, 'UTF-8');
             };
 
             const cellStyle = (v) => {
@@ -379,11 +481,11 @@
                     {!printMode && (
                         <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm no-print">
                             <div className="max-w-screen-2xl mx-auto px-4 py-2 sm:py-3 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
-                                <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto">
+                                <div className="flex items-start gap-2 sm:gap-3 w-full md:flex-1 min-w-0">
                                     <div className="bg-indigo-600 text-white w-9 sm:w-11 h-8 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center text-sm sm:text-xl font-black shrink-0">시</div>
-                                    <div>
-                                        <h1 className="text-sm sm:text-lg font-black text-slate-900 leading-tight">스마트 시수 플래너 (글꽃중 v1.0)</h1>
-                                        <p className="text-[11px] sm:text-xs font-semibold text-slate-600 mt-1">
+                                    <div className="min-w-0 flex-1">
+                                        <h1 className="text-sm sm:text-lg font-black text-slate-900 leading-tight break-keep whitespace-normal">시수배정 계산 프로그램_v1.0</h1>
+                                        <p className="text-[11px] sm:text-xs font-semibold text-slate-600 mt-1 leading-relaxed break-keep whitespace-normal">
                                             교과별 주간 시수와 학급수를 기반으로 교사별 배정을 돕는 프로그램입니다.<br />
                                             '새 교과목 추가' 및 기존 과목 삭제 기능으로 자유롭게 커스텀하여 활용할 수 있습니다.
                                         </p>
@@ -462,7 +564,7 @@
                         )}
 
                         {activeKey && (
-                            <div class="print-clean bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-1.5 sm:p-4">
+                            <div className="print-clean bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-1.5 sm:p-4">
                                 {!printMode && (
                                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 mb-2 no-print border-b border-slate-100 pb-2 sm:pb-3">
                                         <div className="flex flex-wrap items-center gap-2">
@@ -492,9 +594,9 @@
                                     <div className="mb-2 sm:mb-3 p-2 sm:p-3 bg-indigo-50/40 rounded-lg sm:rounded-xl border border-indigo-100 text-xs text-indigo-900 max-w-xl no-print">
                                         <b className="text-indigo-900 block mb-0.5 sm:mb-1 text-xs sm:text-sm">💡 스마트 안내 및 배정 팁</b>
                                         <ul className="list-disc list-inside space-y-0.5 text-slate-600 text-[10px] sm:text-xs">
-                                            <li class="hidden sm:list-item">PC 환경: 마우스로 셀을 클릭하거나 드래그해 범위를 잡고 키보드 숫자를 누르면 일괄 입력됩니다.</li>
-                                            <li class="block sm:hidden text-amber-700 font-bold">📱 모바일 환경: 입력할 칸을 손가락으로 콕 누르면 숫자 입력기 팝업창이 뜹니다.</li>
-                                            <li class="hidden sm:list-item">키보드 방향키 이동  ·  Enter 아래로 이동  ·  Delete 시수 삭제</li>
+                                            <li className="hidden sm:list-item">PC 환경: 마우스로 셀을 클릭하거나 드래그해 범위를 잡고 키보드 숫자를 누르면 일괄 입력됩니다.</li>
+                                            <li className="block sm:hidden text-amber-700 font-bold">📱 모바일 환경: 입력할 칸을 손가락으로 콕 누르면 숫자 입력기 팝업창이 뜹니다.</li>
+                                            <li className="hidden sm:list-item">키보드 방향키 이동  ·  Enter 아래로 이동  ·  Delete 시수 삭제</li>
                                         </ul>
                                     </div>
                                 )}
@@ -509,7 +611,7 @@
                                     </div>
                                 )}
 
-                                <div class="w-full overflow-x-auto rounded-lg border border-slate-200">
+                                <div className="w-full overflow-x-auto rounded-lg border border-slate-200">
                                     <div ref={gridRef} tabIndex={0} className="min-w-[700px] sm:min-w-[950px] outline-none rounded-lg">
                                         <table className="w-full border-collapse text-left table-fixed">
                                             <thead>
@@ -524,8 +626,8 @@
                                                 <tr className="border-b-2 border-slate-200 bg-white">
                                                     <th className="p-1 sm:p-2 text-[10px] sm:text-sm font-bold text-slate-400 sticky left-0 bg-white border-r border-slate-200 z-20">담당교사</th>
                                                     {visibleColumns.map(c => (
-                                                        <th key={c.id} className="px-0.5 py-1 sm:py-2 text-center border-r border-slate-100 w-8 sm:w-12 text-slate-700">
-                                                            <div className="text-[10px] sm:text-sm font-black leading-tight truncate">{c.short}</div>
+                                                        <th key={c.id} className="px-0.5 py-1 sm:py-2 text-center border-r border-slate-100 w-10 sm:w-14 text-slate-700 align-middle">
+                                                            <div className="text-[10px] sm:text-sm font-black leading-tight whitespace-normal break-keep px-0.5">{c.short}</div>
                                                             <div className="text-[9px] sm:text-[11px] font-semibold text-slate-400 mt-0.5">{c.required}h</div>
                                                         </th>
                                                     ))}
