@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>시수배당 배정표</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
-        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; }
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
     </style>
 </head>
 <body>
@@ -18,22 +18,22 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        const CAREER = () => ({ id: 'career1', name: '1학년 진로와직업 지원', required: 1 });
+        const CAREER = () => ({ id: 'career1', name: '1학년 진로와직업', required: 1 });
 
         const INIT_SUBJECTS = {
             korean:    { name: '국어', g1: 4, g2: 5, g3: 4, specials: [CAREER()], teacherCount: 7 },
             social:    { name: '사회(역사)', g1: 3, g2: 2, g3: 4, specials: [CAREER()], teacherCount: 5 },
-            ethics:    { name: '도덕', g1: 3, g2: 2, g3: 0, specials: [], teacherCount: 3 },
+            ethics:    { name: '도덕', g1: 3, g2: 0, g3: 2, specials: [CAREER()], teacherCount: 3 },
             math:      { name: '수학', g1: 4, g2: 4, g3: 3, specials: [CAREER()], teacherCount: 6 },
-            science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER()], teacherCount: 6, names: ['하일민', '이황재', '이세형', '이현재', '강근구', '정수호'] },
+            science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER()], teacherCount: 6 },
             tech_home: { name: '기술·가정', g1: 2, g2: 2, g3: 3, specials: [], teacherCount: 4 },
-            info:      { name: '정보', g1: 2, g2: 0, g3: 0, specials: [], teacherCount: 1 },
+            info:      { name: '정보', g1: 0, g2: 2, g3: 0, specials: [], teacherCount: 1 },
             pe:        { name: '체육', g1: 3, g2: 3, g3: 3, specials: [CAREER()], teacherCount: 5 },
-            music:     { name: '음악', g1: 2, g2: 1, g3: 1, specials: [{ id: 'm1', name: '순회 나감(송촌)', required: -3 }], teacherCount: 2 },
-            art:       { name: '미술', g1: 1, g2: 2, g3: 1, specials: [{ id: 'a1', name: '순회 나감(용전)', required: -3 }], teacherCount: 2 },
-            english:   { name: '영어', g1: 3, g2: 3, g3: 4, specials: [{ id: 'e1', name: '순회 나감(법동)', required: -3 }], teacherCount: 5 },
-            career:    { name: '진로와직업', g1: 1, g2: 1, g3: 0, specials: [], teacherCount: 1 },
-            hanmun:    { name: '한문', g1: 1, g2: 2, g3: 0, specials: [{ id: 'h1', name: '순회 받음', required: 6 }, CAREER()], teacherCount: 2 },
+            music:     { name: '음악', g1: 2, g2: 1, g3: 1, specials: [], teacherCount: 3 },
+            art:       { name: '미술', g1: 1, g2: 2, g3: 1, specials: [], teacherCount: 3 },
+            english:   { name: '영어', g1: 3, g2: 3, g3: 4, specials: [], teacherCount: 6 },
+            career:    { name: '진로와직업', g1: 1, g2: 0, g3: 1, specials: [], teacherCount: 1 },
+            hanmun:    { name: '한문', g1: 1, g2: 2, g3: 0, specials: [CAREER()], teacherCount: 2 },
         };
         const INIT_ORDER = ['korean', 'social', 'ethics', 'math', 'science', 'tech_home', 'info', 'pe', 'music', 'art', 'english', 'career', 'hanmun'];
 
@@ -63,7 +63,6 @@
             return { subjects, order: [...INIT_ORDER], classCounts: { G1: 11, G2: 11, G3: 11 }, tables, activeKey: 'science' };
         }
 
-        const cellKey = (tid, cid) => `${tid}|${cid}`;
         const numShow = (n) => (n === 0 || n === undefined || n === null ? '' : String(n));
 
         function App() {
@@ -297,16 +296,8 @@
                 setTables(st.tables); setActiveKey(st.activeKey && st.subjects[st.activeKey] ? st.activeKey : st.order[0]);
             };
 
-            // 브라우저 로컬스토리지 이용 자동저장 연동
             useEffect(() => {
-                try { const r = localStorage.getItem('auto_save'); if (r) applyState(JSON.parse(r)); } catch (e) {}
-                try {
-                    const metas = [1, 2, 3, 4, 5].map(n => {
-                        const r = localStorage.getItem(`slot_${n}`);
-                        return { n, savedAt: r ? JSON.parse(r).savedAt : null };
-                    });
-                    setSlotMetas(metas);
-                } catch (e) {}
+                setSlotMetas([1, 2, 3, 4, 5].map(n => ({ n, savedAt: null })));
                 loaded.current = true;
             }, []);
 
@@ -420,7 +411,7 @@
                                 <div className="flex items-center gap-2 text-sm flex-wrap">
                                     <span className="font-bold text-slate-500">기타시수</span>
                                     {(subject.specials || []).map(sp => (
-                                        <span key={sp.id} className="all_special inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-1 py-1">
+                                        <span key={sp.id} className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-1 py-1">
                                             <input value={sp.name} onChange={(e) => updateSpecial(sp.id, { name: e.target.value })} className="w-24 bg-transparent text-sm font-semibold outline-none" />
                                             <input type="number" value={sp.required} onChange={(e) => updateSpecial(sp.id, { required: parseInt(e.target.value, 10) || 0 })} className="w-12 border border-slate-300 rounded px-1 py-0.5 text-sm text-center" />
                                             <button onClick={() => removeSpecial(sp.id)} className="text-slate-400 hover:text-rose-500 px-1 font-bold">✕</button>
