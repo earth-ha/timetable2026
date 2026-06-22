@@ -82,20 +82,27 @@
             const [classCounts, setClassCounts] = useState(init.current.classCounts);
             const [tables, setTables] = useState(init.current.tables);
             const [activeKey, setActiveKey] = useState(init.current.activeKey);
+
             const [tab, setTab] = useState('all');
             const [printMode, setPrintMode] = useState(false);
             const [sel, setSel] = useState(null);   
+            const [editBuf, setEditBuf] = useState(null);
             const [history, setHistory] = useState([]);
             const [hi, setHi] = useState(-1);
-            const [confirmDel, setConfirmDel] = useState(null);
+            const [confirmDel, setConfirmDel] = useState(null);     
             const [confirmSubDel, setConfirmSubDel] = useState(false);
             const [toast, setToast] = useState('');
             const [mobileEditCell, setMobileEditCell] = useState(null); 
 
             const allocRef = useRef({});
             const selRef = useRef(null);
+            const selectingRef = useRef(false);
+            const editBufRef = useRef(null);
+            const editSnapRef = useRef(null);
             const gridRef = useRef(null);
             const fileInputRef = useRef(null);
+            const teacherRefs = useRef({});
+            const focusTeacher = useRef(null);
 
             const subject = subjects[activeKey] || { name: '', g1: 0, g2: 0, g3: 0, specials: [], memo: '' };
             const table = tables[activeKey] || { teachers: [], alloc: {} };
@@ -133,8 +140,8 @@
             const setAllocLive = (a) => { allocRef.current = a; setTable(t => ({ ...t, alloc: a })); };
 
             const resetHistory = (a) => { setHistory([JSON.stringify(a)]); setHi(0); };
-            const pushHistory = (currentAlloc) => {
-                const s = JSON.stringify(currentAlloc);
+            const pushHistory = () => {
+                const s = JSON.stringify(allocRef.current);
                 setHistory(h => {
                     const trimmed = h.slice(0, hi + 1);
                     if (trimmed[trimmed.length - 1] === s) return h;
@@ -148,87 +155,540 @@
 
             useEffect(() => { resetHistory(alloc); }, [activeKey]);
             useEffect(() => { selRef.current = sel; }, [sel]);
+            useEffect(() => { setSel(null); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }, [tab, activeKey]);
 
-            const isMobile = () => /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            const cellAt = (r, c) => ({ tid: teachers[r]?.id, cid: visibleColumns[c]?.id });
+            const rectCells = () => {
+                const sx = selRef.current; if (!sx) return [];
+                const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
+                const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
+                const out = [];
+                for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellAt(r, c));
+                return out;
+            };
+            const applyFill = (val, base) => {
+                const a = { ...base };
+                rectCells().forEach(({ tid, cid }) => { if (tid && cid) a[tid] = { ...(a[tid] || {}), [cid]: val }; });
+                return a;
+            };
 
-            const onCellDown = (r, c) => {
+            const commitEdit = () => {
+                if (editBufRef.current != null) { editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; pushHistory(); }
+            };
+            const cancelEdit = () => {
+                if (editBufRef.current != null) { setAllocLive(editSnapRef.current); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }
+            };
+            const typeChar = (ch) => {
+                let b = editBufRef.current;
+                if (b == null) { editSnapRef.current = JSON.parse(JSON.stringify(allocRef.current)); b = ''; }
+                if (ch === '-') { if (b === '') b = '-'; }
+                else b = b + ch;
+                editBufRef.current = b; setEditBuf(b);
+                const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
+                setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
+            };
+            const backspace = () => {
+                if (editBufRef.current != null) {
+                    const b = editBufRef.current.slice(0, -1);
+                    editBufRef.current = b; setEditBuf(b);
+                    const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
+                    setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
+                } else { setAllocLive(applyFill(0, allocRef.current)); pushHistory(); }
+            };
+            const clearSel = () => { commitEdit(); setAllocLive(applyFill(0, allocRef.current)); pushHistory(); };
+            const moveActive = (dr, dc, extend) => {
+                const sx = selRef.current; if (!sx) return;
+                const R = teachers.length, C = visibleColumns.length;
+                const r = Math.min(Math.max(sx.f.r + dr, 0), R - 1);
+                const c = Math.min(Math.max(sx.f.c + dc, 0), C - 1);
+                setSel(extend ? { a: sx.a, f: { r, c } } : { a: { r, c }, f: { r, c } });
+            };
+
+            const onCellDown = (e, r, c) => {
                 if (printMode) return;
-                if (isMobile()) {
+                
+                if (isMobileDevice()) {
                     setSel({ a: { r, c }, f: { r, c } });
-                    setMobileEditCell({ r, c, teacherId: teachers[r].id, teacherName: teachers[r].name, colId: visibleColumns[c].id, colLabel: visibleColumns[c].label, val: alloc[teachers[r].id]?.[visibleColumns[c].id] || 0 });
+                    const targetTeacher = teachers[r];
+                    const targetCol = visibleColumns[c];
+                    const currentVal = alloc[targetTeacher.id]?.[targetCol.id] || 0;
+                    setMobileEditCell({ r, c, teacherId: targetTeacher.id, teacherName: targetTeacher.name || `교사${r+1}`, colId: targetCol.id, colLabel: targetCol.label, val: currentVal });
                     return;
                 }
-                setSel({ a: { r, c }, f: { r, c } });
+
                 if (gridRef.current) gridRef.current.focus();
+                commitEdit();
+                if (e.shiftKey && selRef.current) setSel({ a: selRef.current.a, f: { r, c } });
+                else setSel({ a: { r, c }, f: { r, c } });
+                selectingRef.current = true;
             };
 
-            const handleGridKeyDown = (e) => {
-                if (printMode || !sel) return;
-                const val = parseInt(e.key, 10);
-                if (!isNaN(val)) {
-                    e.preventDefault();
-                    const nextAlloc = { ...alloc, [teachers[sel.a.r].id]: { ...alloc[teachers[sel.a.r].id], [visibleColumns[sel.a.c].id]: val } };
-                    setAllocLive(nextAlloc);
-                    pushHistory(nextAlloc);
-                } else if (e.key === 'Backspace' || e.key === 'Delete') {
-                    e.preventDefault();
-                    const nextAlloc = { ...alloc, [teachers[sel.a.r].id]: { ...alloc[teachers[sel.a.r].id], [visibleColumns[sel.a.c].id]: 0 } };
-                    setAllocLive(nextAlloc);
-                    pushHistory(nextAlloc);
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (sel.a.r < teachers.length - 1) setSel({ a: { r: sel.a.r + 1, c: sel.a.c }, f: { r: sel.a.r + 1, c: sel.a.c } });
-                }
+            const onCellEnter = (r, c) => {
+                if (selectingRef.current && !isMobileDevice()) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
             };
+
+            useEffect(() => {
+                const up = () => { selectingRef.current = false; };
+                window.addEventListener('mouseup', up);
+                window.addEventListener('mouseleave', up); 
+                return () => {
+                    window.removeEventListener('mouseup', up);
+                    window.removeEventListener('mouseleave', up);
+                };
+            }, []);
+
+            useEffect(() => {
+                const onKey = (e) => {
+                    if (printMode || !selRef.current) return;
+                    
+                    const tag = e.target.tagName;
+                    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                        e.preventDefault(); commitEdit(); undo(); return;
+                    }
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                        e.preventDefault(); commitEdit(); redo(); return;
+                    }
+                    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); typeChar(e.key); return; }
+                    if (e.key === '-') { e.preventDefault(); typeChar('-'); return; }
+                    if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
+                    if (e.key === 'Delete') { e.preventDefault(); clearSel(); return; }
+                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); moveActive(1, 0); return; }
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
+                    if (e.key === 'Tab') { e.preventDefault(); commitEdit(); moveActive(0, e.shiftKey ? -1 : 1); return; }
+                    if (e.key.startsWith('Arrow')) {
+                        e.preventDefault(); commitEdit();
+                        const map = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+                        const [dr, dc] = map[e.key]; moveActive(dr, dc, e.shiftKey);
+                    }
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [hi, history, teachers, visibleColumns, printMode]);
+
+            const handleMobileValueSubmit = (val) => {
+                if (!mobileEditCell) return;
+                const { teacherId, colId } = mobileEditCell;
+                const nextAlloc = { ...alloc };
+                nextAlloc[teacherId] = { ...(nextAlloc[teacherId] || {}), [colId]: parseInt(val, 10) || 0 };
+                setAllocLive(nextAlloc);
+                pushHistory();
+                setMobileEditCell(null);
+                flash('배정 시수가 반영되었습니다.');
+            };
+
+            const renameTeacher = (id, name) => setTable(t => ({ ...t, teachers: t.teachers.map(x => x.id === id ? { ...x, name } : x) }));
+            const addTeacher = () => {
+                const id = newId('t');
+                focusTeacher.current = id;
+                setTable(t => ({ ...t, teachers: [...t.teachers, { id, name: '' }] }));
+            };
+            const reallyRemoveTeacher = (id) => {
+                setSel(null);
+                setTable(t => { const a = { ...t.alloc }; delete a[id]; return { ...t, teachers: t.teachers.filter(x => x.id !== id), alloc: a }; });
+                setConfirmDel(null);
+            };
+
+            const updateSubject = (patch) => setSubjects(s => ({ ...s, [activeKey]: { ...s[activeKey], ...patch } }));
+            const addSubject = () => {
+                const key = newId('sub');
+                const id = newId('t');
+                setSubjects(s => ({ ...s, [key]: { name: '새 교과목', g1: 0, g2: 0, g3: 0, specials: [], memo: '' } }));
+                setOrder(o => [...o, key]);
+                setTables(tb => ({ ...tb, [key]: { teachers: [{ id, name: '' }], alloc: {} } }));
+                setActiveKey(key);
+                flash('새 과목이 추가되었습니다.');
+            };
+            const reallyRemoveSubject = () => {
+                const key = activeKey;
+                const remaining = order.filter(k => k !== key);
+                setOrder(remaining);
+                setSubjects(s => { const n = { ...s }; delete n[key]; return n; });
+                setTables(tb => { const n = { ...tb }; delete n[key]; return n; });
+                setActiveKey(remaining[0] || '');
+                setConfirmSubDel(false);
+            };
+            const addSpecial = () => updateSubject({ specials: [...(subject.specials || []), { id: newId('sp'), name: '기타시수', required: 0 }] });
+            const updateSpecial = (id, patch) => updateSubject({ specials: subject.specials.map(s => s.id === id ? { ...s, ...patch } : s) });
+            const removeSpecial = (id) => updateSubject({ specials: subject.specials.filter(s => s.id !== id) });
+
+            const setClassCount = (gid, n) => setClassCounts(c => ({ ...c, [gid]: Math.max(1, Math.min(20, n || 1)) }));
+
+            const teacherTotal = (id) => allColumns.reduce((s, c) => s + (alloc[id]?.[c.id] || 0), 0);
+            const colTotal = (cid) => teachers.reduce((s, t) => s + (alloc[t.id]?.[cid] || 0), 0);
+            const grand = teachers.reduce((s, t) => s + teacherTotal(t.id), 0);
+            
+            const targetTotalCalculated = useMemo(() => {
+                if (!activeKey) return 0;
+                const baseSpecials = (subject.specials || []).reduce((sum, sp) => sum + (sp.required || 0), 0);
+                return (Number(subject.g1) * Number(classCounts.G1)) + 
+                       (Number(subject.g2) * Number(classCounts.G2)) + 
+                       (Number(subject.g3) * Number(classCounts.G3)) + 
+                       baseSpecials;
+            }, [subject, classCounts, activeKey]);
 
             const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 1600); };
+
+            const exportToJSONFile = () => {
+                const dataStr = JSON.stringify({ subjects, order, classCounts, tables });
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                const exportFileDefaultName = `시수배당_백업데이터_${new Date().toISOString().slice(0,10)}.json`;
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+                flash('백업 파일(.json)이 다운로드되었습니다.');
+            };
+
             const importFromJSONFile = (e) => {
-                const file = e.target.files[0];
-                if(!file) return;
-                const reader = new FileReader();
-                reader.readAsText(file, "UTF-8");
-                reader.onload = (event) => {
+                const fileReader = new FileReader();
+                if(!e.target.files[0]) return;
+                fileReader.readAsText(e.target.files[0], "UTF-8");
+                fileReader.onload = (event) => {
                     try {
-                        const p = JSON.parse(event.target.result);
-                        if(p.subjects && p.tables && p.order) {
-                            setSubjects(p.subjects); setOrder(p.order); setClassCounts(p.classCounts); setTables(p.tables); setActiveKey(p.order[0]);
-                            flash('데이터 복구 성공!');
-                        } else alert('파일 형식이 맞지 않습니다.');
-                    } catch(err) { alert('파일 읽기 오류'); }
+                        const parsed = JSON.parse(event.target.result);
+                        if(parsed.subjects && parsed.tables && parsed.order) {
+                            setSubjects(parsed.subjects);
+                            setOrder(parsed.order);
+                            setClassCounts(parsed.classCounts || { G1: 11, G2: 11, G3: 11 });
+                            setTables(parsed.tables);
+                            setActiveKey(parsed.order[0] || '');
+                            flash('데이터를 성공적으로 복구했습니다!');
+                        } else {
+                            alert('올바른 배정표 백업 파일이 아닙니다.');
+                        }
+                    } catch (err) {
+                        alert('파일 읽기 중 오류가 발생했습니다.');
+                    }
                     if (fileInputRef.current) fileInputRef.current.value = '';
                 };
             };
 
+            const triggerPrint = () => { window.print(); };
+
+            const cellStyle = (v) => {
+                if (v === 1) return 'bg-sky-100 text-sky-800';
+                if (v === 2) return 'bg-violet-100 text-violet-800';
+                if (v === 3) return 'bg-emerald-100 text-emerald-800';
+                if (v >= 4) return 'bg-amber-100 text-amber-900';
+                if (v < 0) return 'bg-rose-100 text-rose-800';
+                return 'bg-white text-slate-400';
+            };
+            const loadColor = (t) => t === 0 ? 'bg-slate-100 text-slate-400' : t > 22 ? 'bg-rose-100 text-rose-700' : t < 16 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+
+            const tabs = [
+                { key: 'all', gid: null, label: '전체보기' },
+                { key: '1', gid: 'G1', label: `1학년 (${subject.g1}h)` },
+                { key: '2', gid: 'G2', label: `2학년 (${subject.g2}h)` },
+                { key: '3', gid: 'G3', label: `3학년 (${subject.g3}h)` },
+                ...((subject.specials || []).length ? [{ key: 'etc', gid: 'ETC', label: '기타시수' }] : []),
+            ];
+
+            const numInput = "w-11 sm:w-14 border border-slate-300 rounded-lg px-1 sm:px-2 py-0.5 sm:py-1 text-xs sm:text-base text-center font-black focus:ring-2 focus:ring-indigo-500 outline-none";
+
             return (
-                <div onKeyDown={handleGridKeyDown} className="bg-slate-100 min-h-screen text-xs sm:text-base">
-                    <header className="bg-white border-b p-4 text-center">
-                        <h1 className="text-xl font-black">시수배정 계산 프로그램</h1>
-                    </header>
-                    <main className="p-4">
-                        <div className="flex gap-2 mb-4">
-                            {order.map(k => <button key={k} onClick={() => setActiveKey(k)} className={`px-4 py-2 rounded ${activeKey === k ? 'bg-blue-500 text-white' : 'bg-white'}`}>{subjects[k].name}</button>)}
-                        </div>
+                <div className={`select-none ${printMode ? 'bg-white' : 'bg-slate-100'} text-slate-800 transition-colors duration-200 min-h-screen text-xs sm:text-[15px]`}>
+                    {!printMode && (
+                        <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm no-print">
+                            <div className="max-w-screen-2xl mx-auto px-4 py-2 sm:py-3 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
+                                <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto">
+                                    <div className="bg-indigo-600 text-white w-9 sm:w-11 h-8 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center text-sm sm:text-xl font-black shrink-0">시</div>
+                                    <div>
+                                        <h1 className="text-sm sm:text-lg font-black text-slate-900 leading-tight">시수배정 계산 프로그램_v1.0 </h1>
+                                        <p className="text-[11px] sm:text-xs font-semibold text-slate-600 mt-1">
+                                            교과별 주간 시수와 학급수를 기반으로 교사별 배정을 돕는 프로그램입니다.<br />
+                                            '새 교과목 추가' 및 기존 과목 삭제 기능으로 자유롭게 커스텀하여 활용할 수 있습니다.
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex flex-wrap items-center gap-1 sm:gap-2 w-full md:w-auto justify-end">
+                                    <button onClick={exportToJSONFile} className="bg-slate-800 hover:bg-slate-900 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg flex items-center gap-1 shadow-sm">💾 데이터 파일 백업</button>
+                                    <button onClick={() => fileInputRef.current.click()} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg flex items-center gap-1 shadow-sm">📂 백업 파일 로드</button>
+                                    <input type="file" ref={fileInputRef} onChange={importFromJSONFile} accept=".json" className="hidden" />
+                                </div>
+                            </div>
+                        </header>
+                    )}
+
+                    <main className="max-w-screen-2xl mx-auto px-2 sm:px-4 py-2 sm:py-4">
+                        {!printMode && (
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 mb-3 sm:mb-4 no-print">
+                                <div className="flex flex-col gap-2.5 sm:gap-3">
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 sm:pb-2">
+                                        <span className="text-[10px] sm:text-xs font-black text-slate-500 uppercase tracking-wider">담당 교과목 선택</span>
+                                        <button onClick={addSubject} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-indigo-200 transition-colors">+ 새 교과목 추가</button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                        {order.map(k => {
+                                            const isSelected = activeKey === k;
+                                            return (
+                                                <button key={k} onClick={() => setActiveKey(k)}
+                                                    className={`px-3.5 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-black transition-all border ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                                    {subjects[k]?.name}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {activeKey && (
+                                    <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-200 flex flex-wrap items-center gap-y-3 gap-x-4 sm:gap-x-6 text-[11px] sm:text-sm">
+                                        <div className="flex items-center gap-1.5 sm:gap-2 bg-indigo-50/50 p-1 sm:p-1.5 rounded-lg sm:rounded-xl border border-indigo-100">
+                                            <span className="text-[10px] sm:text-xs font-black text-indigo-800 pl-0.5">교과명 변경:</span>
+                                            <input value={subject.name} onChange={(e) => updateSubject({ name: e.target.value })}
+                                                className="w-20 sm:w-28 border border-indigo-300 bg-white rounded-lg px-1.5 sm:px-2 py-0.5 sm:py-1 text-[11px] sm:text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="과목명" />
+                                            <button onClick={() => setConfirmSubDel(true)} className="text-[10px] sm:text-xs font-bold text-rose-600 hover:bg-rose-50 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">삭제</button>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 sm:gap-2">
+                                            <span className="font-bold text-slate-500">학년별 주간 시수:</span>
+                                            {['1', '2', '3'].map(g => (
+                                                <label key={g} className="flex items-center gap-0.5 sm:gap-1 text-[11px] sm:text-xs font-bold"><span className="text-slate-400">{g}학년</span>
+                                                    <input type="number" min="0" max="10" value={subject[`g${g}`]} onChange={(e) => updateSubject({ [`g${g}`]: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 sm:gap-2">
+                                            <span className="font-bold text-slate-500">학년별 총 학급수:</span>
+                                            {['G1', 'G2', 'G3'].map(g => (
+                                                <label key={g} className="flex items-center gap-0.5 sm:gap-1 text-[11px] sm:text-xs font-bold"><span className="text-slate-400">{g[1]}학년</span>
+                                                    <input type="number" min="1" max="20" value={classCounts[g]} onChange={(e) => setClassCount(g, parseInt(e.target.value, 10))} className={numInput} /></label>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                                            <span className="font-bold text-slate-500">기타 지원시수:</span>
+                                            {(subject.specials || []).map(sp => (
+                                                <span key={sp.id} className="inline-flex items-center gap-0.5 sm:gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 text-[10px] sm:text-xs">
+                                                    <span className="font-semibold text-slate-700 px-0.5 sm:px-1">{sp.name}</span>
+                                                    <input type="number" value={sp.required} onChange={(e) => updateSpecial(sp.id, { required: parseInt(e.target.value, 10) || 0 })} className="w-8 sm:w-10 border border-slate-300 rounded text-center font-bold text-[10px] sm:text-xs" />
+                                                    <button onClick={() => removeSpecial(sp.id)} className="text-slate-400 hover:text-rose-500 px-0.5 sm:px-1 font-bold">✕</button>
+                                                </span>
+                                            ))}
+                                            <button onClick={addSpecial} className="text-[10px] sm:text-xs font-bold text-slate-500 hover:bg-slate-100 border border-dashed border-slate-300 rounded-lg px-1.5 sm:px-2 py-0.5 sm:py-1">+ 추가</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {activeKey && (
-                            <div ref={gridRef} tabIndex={0} className="overflow-x-auto bg-white p-4">
-                                <table className="w-full border">
-                                    <thead><tr><th className="border p-2">교사명</th>{visibleColumns.map(c => <th key={c.id} className="border p-2">{c.short}</th>)}</tr></thead>
-                                    <tbody>
-                                        {teachers.map((t, r) => (
-                                            <tr key={t.id}>
-                                                <td className="border p-2">{t.name}</td>
-                                                {visibleColumns.map((c, ci) => (
-                                                    <td key={c.id} onMouseDown={(e) => onCellDown(r, ci)} className={`border p-2 cursor-pointer ${sel && sel.a.r === r && sel.a.c === ci ? 'bg-blue-200' : ''}`}>
-                                                        {numShow(alloc[t.id]?.[c.id])}
-                                                    </td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div class="print-clean bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-1.5 sm:p-4">
+                                {!printMode && (
+                                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 mb-2 no-print border-b border-slate-100 pb-2 sm:pb-3">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <div className="flex flex-wrap gap-1">
+                                                {tabs.map(t => {
+                                                    const active = tab === t.key;
+                                                    const solid = GRADE_META[t.gid]?.solid || 'bg-slate-700';
+                                                    return <button key={t.key} onClick={() => setTab(t.key)} className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all ${active ? `${solid} text-white shadow` : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>{t.label}</button>;
+                                                })}
+                                            </div>
+                                            <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-xs sm:text-sm font-black flex items-center shadow-sm">
+                                                ⏳ {subject.name} 총 배정량 :&nbsp;<span className="text-indigo-600">{grand}</span>&nbsp;/ {targetTotalCalculated}h
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 self-end lg:self-auto">
+                                            <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 mr-0.5 sm:mr-1">
+                                                <button onClick={undo} disabled={hi <= 0} className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-xs text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="되돌리기 (Ctrl+Z)">↶</button>
+                                                <button onClick={redo} disabled={hi >= history.length - 1} className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-xs text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="다시실행 (Ctrl+Y)">↷</button>
+                                            </div>
+                                            <button onClick={triggerPrint} className="bg-slate-800 hover:bg-slate-900 text-white px-2.5 sm:px-3 py-1 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-black flex items-center gap-0.5 sm:gap-1">🖨️ 인쇄 출력 (Ctrl+P)</button>
+                                            <button onClick={() => setPrintMode(true)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 sm:px-3 py-1 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-bold">인쇄 미리보기</button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {!printMode && (
+                                    <div className="mb-2 sm:mb-3 p-2 sm:p-3 bg-indigo-50/40 rounded-lg sm:rounded-xl border border-indigo-100 text-xs text-indigo-900 max-w-xl no-print">
+                                        <b className="text-indigo-900 block mb-0.5 sm:mb-1 text-xs sm:text-sm">💡 스마트 안내 및 배정 팁</b>
+                                        <ul className="list-disc list-inside space-y-0.5 text-slate-600 text-[10px] sm:text-xs">
+                                            <li class="hidden sm:list-item">PC 환경: 마우스로 셀을 클릭하거나 드래그해 범위를 잡고 키보드 숫자를 누르면 일괄 입력됩니다.</li>
+                                            <li class="block sm:hidden text-amber-700 font-bold">📱 모바일 환경: 입력할 칸을 손가락으로 콕 누르면 숫자 입력기 팝업창이 뜹니다.</li>
+                                            <li class="hidden sm:list-item">키보드 방향키 이동  ·  Enter 아래로 이동  ·  Delete 시수 삭제</li>
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {printMode && (
+                                    <div className="flex items-center justify-between mb-3 sm:mb-4 border-b pb-1.5 sm:pb-2 no-print">
+                                        <h2 className="text-xs sm:text-sm font-bold text-slate-900">2026학년도 2학기 [{subject.name}] 시수배당 배정표</h2>
+                                        <div className="flex gap-1.5 sm:gap-2">
+                                            <button onClick={triggerPrint} className="bg-indigo-600 text-white px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-bold shadow">인쇄 출력하기</button>
+                                            <button onClick={() => setPrintMode(false)} className="bg-slate-200 text-slate-700 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-bold">편집 창 전환</button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div class="w-full overflow-x-auto rounded-lg border border-slate-200">
+                                    <div ref={gridRef} tabIndex={0} className="min-w-[700px] sm:min-w-[950px] outline-none rounded-lg">
+                                        <table className="w-full border-collapse text-left table-fixed">
+                                            <thead>
+                                                <tr className="border-b border-slate-200 bg-slate-50/70">
+                                                    <th className="p-1 sm:p-2 text-xs sm:text-sm font-extrabold text-slate-500 sticky left-0 bg-slate-50 border-r border-slate-200 w-[95px] sm:w-[150px] z-20">구분</th>
+                                                    {headerGroups.map((g, i) => {
+                                                        const m = GRADE_META[g.gid];
+                                                        const label = g.gid === 'ETC' ? '기타시수' : `${m.name} (${g.req}h)`;
+                                                        return <th key={i} colSpan={g.span} className={`p-1 sm:p-2 text-[10px] sm:text-sm font-black text-center border-r border-slate-200 ${m.soft} ${m.text}`}>{label}</th>;
+                                                    })}
+                                                </tr>
+                                                <tr className="border-b-2 border-slate-200 bg-white">
+                                                    <th className="p-1 sm:p-2 text-[10px] sm:text-sm font-bold text-slate-400 sticky left-0 bg-white border-r border-slate-200 z-20">담당교사</th>
+                                                    {visibleColumns.map(c => (
+                                                        <th key={c.id} className="px-0.5 py-1 sm:py-2 text-center border-r border-slate-100 w-8 sm:w-12 text-slate-700">
+                                                            <div className="text-[10px] sm:text-sm font-black leading-tight truncate">{c.short}</div>
+                                                            <div className="text-[9px] sm:text-[11px] font-semibold text-slate-400 mt-0.5">{c.required}h</div>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {teachers.map((t, r) => {
+                                                    const tot = teacherTotal(t.id);
+                                                    return (
+                                                        <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                                                            <td className="p-1 sm:p-2 sticky left-0 bg-white border-r border-slate-200 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                                                                <div className="flex items-center gap-0.5 sm:gap-1">
+                                                                    <input value={t.name} disabled={printMode}
+                                                                        onChange={(e) => renameTeacher(t.id, e.target.value)} placeholder="교사명"
+                                                                        className="select-text flex-1 min-w-0 text-xs sm:text-base font-black text-slate-800 bg-transparent border-b border-slate-200 focus:border-indigo-500 focus:bg-indigo-50 rounded px-0.5 sm:px-1 py-0.5 outline-none" />
+                                                                    {!printMode && (
+                                                                        <button onClick={() => setConfirmDel({ id: t.id, name: t.name })}
+                                                                            className="shrink-0 w-4 sm:w-5 h-4 sm:h-5 flex items-center justify-center rounded-full text-slate-300 hover:text-white hover:bg-rose-500 text-[9px] sm:text-xs font-bold transition-colors" title="삭제">✕</button>
+                                                                    )}
+                                                                </div>
+                                                                <div className={`mt-0.5 sm:mt-1 inline-block px-1 sm:px-1.5 py-0.5 rounded-md text-[10px] sm:text-xs font-black ${loadColor(tot)}`}>합 {tot}h</div>
+                                                            </td>
+                                                            {visibleColumns.map((c, ci) => {
+                                                                const raw = alloc[t.id]?.[c.id] || 0;
+                                                                const sx = sel;
+                                                                let selected = false, active = false;
+                                                                if (sx) {
+                                                                    const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
+                                                                    const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
+                                                                    selected = r >= r0 && r <= r1 && ci >= c0 && ci <= c1;
+                                                                    active = sx.f.r === r && sx.f.c === ci;
+                                                                }
+                                                                
+                                                                const showSelectedRing = selected && !printMode;
+                                                                const showActiveRing = active && !printMode;
+
+                                                                return (
+                                                                    <td key={c.id} onMouseDown={(e) => onCellDown(e, r, ci)} onMouseEnter={() => onCellEnter(r, ci)}
+                                                                        className={`relative border-r border-slate-100 text-center text-xs sm:text-xl font-black py-1.5 sm:py-2.5 ${cellStyle(raw)} ${showActiveRing ? 'ring-2 ring-indigo-600 ring-inset z-10' : showSelectedRing ? 'ring-2 ring-indigo-300 ring-inset' : ''} selected-ring cursor-pointer`}>
+                                                                        {numShow(raw)}
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {!printMode && (
+                                                    <tr className="border-b border-slate-100 no-print">
+                                                        <td className="p-1 sm:p-2 sticky left-0 bg-white border-r border-slate-200 z-10">
+                                                            <button onClick={addTeacher} className="w-full flex items-center justify-center gap-0.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 text-[10px] sm:text-sm font-bold transition-colors">＋ 명단 추가</button>
+                                                        </td>
+                                                        <td colSpan={visibleColumns.length} className="bg-slate-50/50"></td>
+                                                    </tr>
+                                                )}
+                                                <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700">
+                                                    <td className="p-1 sm:p-2 text-[10px] sm:text-sm sticky left-0 bg-slate-100 border-r border-slate-200 z-10">배정 합계</td>
+                                                    {visibleColumns.map(c => {
+                                                        const got = colTotal(c.id), diff = got - c.required;
+                                                        let cls = 'bg-emerald-50 text-emerald-700', mark = '✓';
+                                                        if (diff < 0) { cls = 'bg-amber-50 text-amber-700'; mark = `${diff}`; }
+                                                        else if (diff > 0) { cls = 'bg-rose-50 text-rose-700'; mark = `+${diff}`; }
+                                                        return (
+                                                            <td key={c.id} className={`px-0.5 py-0.5 sm:py-1 text-center border-r border-slate-100 ${cls}`}>
+                                                                <div className="text-xs sm:text-base font-black">{got}</div>
+                                                                <div className="text-[10px] sm:text-xs font-black">{mark}</div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 sm:mt-5 p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-inner">
+                                    <h3 className="text-xs sm:text-sm font-black text-slate-700 flex items-center gap-1 sm:gap-1.5 mb-1.5 sm:mb-2">
+                                        📋 [{subject.name || '선택교과'}] 특이사항 및 메모란
+                                    </h3>
+                                    <textarea 
+                                        value={subject.memo || ''} 
+                                        disabled={printMode}
+                                        onChange={(e) => updateSubject({ memo: e.target.value })}
+                                        placeholder="교과 협의 내용이나 강사 배정 특이사항, 순회 일정 메모 등을 자유롭게 기입하세요. (데이터 백업 시 함께 보관됩니다)"
+                                        className="w-full h-20 sm:h-24 bg-white border border-slate-300 rounded-lg p-2 sm:p-3 text-xs sm:text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 transition-all resize-none placeholder-slate-400"
+                                    />
+                                </div>
                             </div>
                         )}
                     </main>
-                    {toast && <div className="fixed bottom-4 left-4 bg-black text-white p-2 rounded">{toast}</div>}
+                    
+                    <footer className="no-print max-w-screen-2xl mx-auto px-3 sm:px-4 pb-8 mt-4 text-center">
+                        <div className="text-slate-300 text-[10px] sm:text-xs font-normal space-y-1">
+                            <p>제작 및 배포: 1min </p>
+                            <p>본 프로그램은 웹 브라우저 기반으로 작동하므로, 작업 종료 전 상단의 [💾 데이터 파일 백업]을 이용해 데이터를 따로 저장하세요.</p>
+                        </div>
+                    </footer>
+
+                    {mobileEditCell && (
+                        <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-end justify-center p-0 sm:p-4 no-print" onClick={() => setMobileEditCell(null)}>
+                            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-2 sm:pb-3 mb-3 sm:mb-4">
+                                    <div>
+                                        <h4 className="text-sm sm:text-base font-black text-slate-900">📱 모바일 시수 직접 입력</h4>
+                                        <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">{mobileEditCell.teacherName} ➔ {mobileEditCell.colLabel}</p>
+                                    </div>
+                                    <button onClick={() => setMobileEditCell(null)} className="text-slate-400 font-bold text-base sm:text-lg px-1.5 sm:px-2">✕</button>
+                                </div>
+                                <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-3 sm:mb-4">
+                                    {[0, 1, 2, 3, 4, 5, 6, 7].map(num => (
+                                        <button key={num} onClick={() => handleMobileValueSubmit(num)}
+                                            className={`py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-base sm:text-lg font-black border transition-all ${mobileEditCell.val === num ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 active:bg-slate-200'}`}>
+                                            {num === 0 ? '지우기' : `${num}h`}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex gap-1.5 sm:gap-2">
+                                    <button onClick={() => handleMobileValueSubmit(0)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold border border-slate-200">초기화(0)</button>
+                                    <button onClick={() => setMobileEditCell(null)} className="flex-1 bg-slate-800 text-white py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold shadow-md">닫기</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {confirmDel && (
+                        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4 no-print" onClick={() => setConfirmDel(null)}>
+                            <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4 sm:p-5 text-center" onClick={(e) => e.stopPropagation()}>
+                                <p className="text-sm sm:text-base font-bold text-slate-800">{confirmDel.name || '이 교사'} 명단을 삭제할까요?</p>
+                                <div className="mt-3 sm:mt-4 flex gap-1.5 sm:gap-2">
+                                    <button onClick={() => setConfirmDel(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold">취소</button>
+                                    <button onClick={() => reallyRemoveTeacher(confirmDel.id)} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold">삭제</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {confirmSubDel && (
+                        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4 no-print" onClick={() => setConfirmSubDel(false)}>
+                            <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4 sm:p-5 text-center" onClick={(e) => e.stopPropagation()}>
+                                <p className="text-sm sm:text-base font-bold text-slate-800">'{subject.name}' 과목 배정표를 삭제할까요?</p>
+                                <div className="mt-3 sm:mt-4 flex gap-1.5 sm:gap-2">
+                                    <button onClick={() => setConfirmSubDel(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold">취소</button>
+                                    <button onClick={reallyRemoveSubject} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold">삭제</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {toast && (
+                        <div className="fixed bottom-4 sm:bottom-5 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg shadow-lg z-50 no-print">{toast}</div>
+                    )}
                 </div>
             );
         }
