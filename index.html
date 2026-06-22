@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>시수배당 계산 프로그램</title>
+    <title>시수배정 계산 프로그램</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
@@ -232,6 +232,16 @@
             };
 
             useEffect(() => {
+                const up = () => { selectingRef.current = false; };
+                window.addEventListener('mouseup', up);
+                window.addEventListener('mouseleave', up); 
+                return () => {
+                    window.removeEventListener('mouseup', up);
+                    window.removeEventListener('mouseleave', up);
+                };
+            }, []);
+
+            useEffect(() => {
                 const onKey = (e) => {
                     if (printMode || !selRef.current) return;
                     
@@ -322,6 +332,8 @@
                        baseSpecials;
             }, [subject, classCounts, activeKey]);
 
+            const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 1600); };
+
             const exportToJSONFile = () => {
                 const dataStr = JSON.stringify({ subjects, order, classCounts, tables });
                 const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
@@ -334,9 +346,11 @@
             };
 
             const importFromJSONFile = (e) => {
+                const files = e.target.files;
+                if(!files || !files[0]) return;
+                
                 const fileReader = new FileReader();
-                if(!e.target.files[0]) return;
-                fileReader.readAsText(e.target.files[0], "UTF-8");
+                fileReader.readAsText(files[0], "UTF-8");
                 fileReader.onload = (event) => {
                     try {
                         const parsed = JSON.parse(event.target.result);
@@ -353,10 +367,31 @@
                     } catch (err) {
                         alert('파일 읽기 중 오류가 발생했습니다.');
                     }
+                    if (fileInputRef.current) fileInputRef.current.value = '';
                 };
             };
 
             const triggerPrint = () => { window.print(); };
+
+            const cellStyle = (v) => {
+                if (v === 1) return 'bg-sky-100 text-sky-800';
+                if (v === 2) return 'bg-violet-100 text-violet-800';
+                if (v === 3) return 'bg-emerald-100 text-emerald-800';
+                if (v >= 4) return 'bg-amber-100 text-amber-900';
+                if (v < 0) return 'bg-rose-100 text-rose-800';
+                return 'bg-white text-slate-400';
+            };
+            const loadColor = (t) => t === 0 ? 'bg-slate-100 text-slate-400' : t > 22 ? 'bg-rose-100 text-rose-700' : t < 16 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+
+            const tabs = [
+                { key: 'all', gid: null, label: '전체보기' },
+                { key: '1', gid: 'G1', label: `1학년 (${subject.g1}h)` },
+                { key: '2', gid: 'G2', label: `2학년 (${subject.g2}h)` },
+                { key: '3', gid: 'G3', label: `3학년 (${subject.g3}h)` },
+                ...((subject.specials || []).length ? [{ key: 'etc', gid: 'ETC', label: '기타시수' }] : []),
+            ];
+
+            const numInput = "w-11 sm:w-14 border border-slate-300 rounded-lg px-1 sm:px-2 py-0.5 sm:py-1 text-xs sm:text-base text-center font-black focus:ring-2 focus:ring-indigo-500 outline-none";
 
             return (
                 <div className={`select-none ${printMode ? 'bg-white' : 'bg-slate-100'} text-slate-800 transition-colors duration-200 min-h-screen text-xs sm:text-[15px]`}>
@@ -366,7 +401,7 @@
                                 <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto">
                                     <div className="bg-indigo-600 text-white w-9 sm:w-11 h-8 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center text-sm sm:text-xl font-black shrink-0">시</div>
                                     <div>
-                                        <h1 className="text-sm sm:text-lg font-black text-slate-900 leading-tight">시수배당 배정 도우미(글꽃중)</h1>
+                                        <h1 className="text-sm sm:text-lg font-black text-slate-900 leading-tight">시수배정 계산 프로그램</h1>
                                         <p className="text-[11px] sm:text-xs font-semibold text-slate-600 mt-1">
                                             교과별 주간 시수와 학급수를 기반으로 교사별 배정을 돕는 프로그램입니다.<br />
                                             '새 교과목 추가' 및 기존 과목 삭제 기능으로 자유롭게 커스텀하여 활용할 수 있습니다.
@@ -665,7 +700,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(App());
+        root.render(<App />);
     </script>
 </body>
 </html>
