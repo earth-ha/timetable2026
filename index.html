@@ -354,8 +354,6 @@
                 };
             };
 
-            const triggerPrint = () => { window.print(); };
-
             const cellStyle = (v) => {
                 if (v === 1) return 'bg-sky-100 text-sky-800';
                 if (v === 2) return 'bg-violet-100 text-violet-800';
@@ -505,8 +503,8 @@
                                     <div className="flex items-center justify-between mb-3 sm:mb-4 border-b pb-1.5 sm:pb-2 no-print">
                                         <h2 className="text-xs sm:text-sm font-bold text-slate-900">2026학년도 2학기 [{subject.name}] 시수배당 배정표</h2>
                                         <div className="flex gap-1.5 sm:gap-2">
-                                            <button onClick={triggerPrint} className="bg-indigo-600 text-white px-2.5 py-1.5 rounded-md text-[10px] sm:text-xs font-bold shadow">인쇄 출력하기</button>
-                                            <button onClick={() => setPrintMode(false)} className="bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-md text-[10px] sm:text-xs font-bold">편집 창 전환</button>
+                                            <button onClick={triggerPrint} className="bg-indigo-600 text-white px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-bold shadow">인쇄 출력하기</button>
+                                            <button onClick={() => setPrintMode(false)} className="bg-slate-200 text-slate-700 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-bold">편집 창 전환</button>
                                         </div>
                                     </div>
                                 )}
@@ -620,7 +618,7 @@
                     
                     <footer className="no-print max-w-screen-2xl mx-auto px-3 sm:px-4 pb-8 mt-4 text-center">
                         <div className="text-slate-300 text-[10px] sm:text-xs font-normal space-y-1">
-                            <p>제작 및 배포: 1min </p>
+                            <p>제작 및 배포: 1min</p>
                             <p>본 프로그램은 웹 브라우저 기반으로 작동하므로, 작업 종료 전 상단의 [💾 데이터 파일 백업]을 이용해 데이터를 따로 저장하세요.</p>
                         </div>
                     </footer>
