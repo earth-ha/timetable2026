@@ -8,7 +8,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    
     <style>
         body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
         @media print {
@@ -16,7 +15,6 @@
             body { background-color: white !important; padding: 0 !important; }
             main { padding: 0 !important; max-width: 100% !important; }
             .print-clean { border: none !important; box-shadow: none !important; border-radius: 0 !important; }
-            /* 🟢 인쇄 출력 시 파란색 선택 테두리를 강제로 없애 가시성을 높입니다. */
             .selected-ring { ring: none !important; outline: none !important; }
         }
     </style>
@@ -222,7 +220,7 @@
                     return;
                 }
 
-                // 🟢 포커스가 탈조하는 현상을 원천 차단하기 위해 임시 이벤트 처리를 완벽하게 보정했습니다.
+                if (gridRef.current) gridRef.current.focus();
                 commitEdit();
                 if (e.shiftKey && selRef.current) setSel({ a: selRef.current.a, f: { r, c } });
                 else setSel({ a: { r, c }, f: { r, c } });
@@ -233,14 +231,8 @@
                 if (selectingRef.current && !isMobileDevice()) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
             };
 
-            // 🟢 마우스 떼는 즉시 grid 영역에 강제로 키보드 활성 포커스를 때려 박는 안전 로직 연동 완료!
             useEffect(() => {
-                const up = () => { 
-                    if (selectingRef.current && gridRef.current) {
-                        gridRef.current.focus();
-                    }
-                    selectingRef.current = false; 
-                };
+                const up = () => { selectingRef.current = false; };
                 window.addEventListener('mouseup', up);
                 window.addEventListener('mouseleave', up); 
                 return () => {
@@ -248,6 +240,36 @@
                     window.removeEventListener('mouseleave', up);
                 };
             }, []);
+
+            useEffect(() => {
+                const onKey = (e) => {
+                    if (printMode || !selRef.current) return;
+                    
+                    const tag = e.target.tagName;
+                    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                        e.preventDefault(); commitEdit(); undo(); return;
+                    }
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                        e.preventDefault(); commitEdit(); redo(); return;
+                    }
+                    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); typeChar(e.key); return; }
+                    if (e.key === '-') { e.preventDefault(); typeChar('-'); return; }
+                    if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
+                    if (e.key === 'Delete') { e.preventDefault(); clearSel(); return; }
+                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); moveActive(1, 0); return; }
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
+                    if (e.key === 'Tab') { e.preventDefault(); commitEdit(); moveActive(0, e.shiftKey ? -1 : 1); return; }
+                    if (e.key.startsWith('Arrow')) {
+                        e.preventDefault(); commitEdit();
+                        const map = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+                        const [dr, dc] = map[e.key]; moveActive(dr, dc, e.shiftKey);
+                    }
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [hi, history, teachers, visibleColumns, printMode]);
 
             const handleMobileValueSubmit = (val) => {
                 if (!mobileEditCell) return;
@@ -452,6 +474,13 @@
                             </div>
                         )}
 
+                        {!activeKey && (
+                            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 text-center text-slate-400 font-medium">
+                                <div className="text-4xl mb-3">☝️</div>
+                                위의 목록 버튼에서 배정할 <b className="text-slate-700 font-black">교과목 단추를 선택</b>하거나 새로운 과목을 추가해 주세요!
+                            </div>
+                        )}
+
                         {activeKey && (
                             <div class="print-clean bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-2 sm:p-4">
                                 {!printMode && (
@@ -501,7 +530,6 @@
                                 )}
 
                                 <div class="w-full overflow-x-auto rounded-lg border border-slate-200">
-                                    {/* 🟢 포커스 해제를 방지하도록 outline 설정을 부드럽게 매핑 완료 */}
                                     <div ref={gridRef} tabIndex={0} className="min-w-[950px] outline-none rounded-lg">
                                         <table className="w-full border-collapse text-left table-fixed">
                                             <thead>
@@ -551,13 +579,12 @@
                                                                     active = sx.f.r === r && sx.f.c === ci;
                                                                 }
                                                                 
-                                                                // 🟢 미리보기(printMode) 플래그가 활성화되면 파란색 링 테두리 스타일 클래스를 완전히 차단 제거합니다!
                                                                 const showSelectedRing = selected && !printMode;
                                                                 const showActiveRing = active && !printMode;
 
                                                                 return (
                                                                     <td key={c.id} onMouseDown={(e) => onCellDown(e, r, ci)} onMouseEnter={() => onCellEnter(r, ci)}
-                                                                        className={`relative border-r border-slate-100 text-center text-xl font-black py-2.5 ${cellStyle(raw)} ${showActiveRing ? 'ring-2 ring-indigo-600 ring-inset z-10' : showSelectedRing ? 'ring-2 ring-indigo-300 ring-inset' : ''} selected-ring`}>
+                                                                        className={`relative border-r border-slate-100 text-center text-xl font-black py-2.5 ${cellStyle(raw)} ${showActiveRing ? 'ring-2 ring-indigo-600 ring-inset z-10' : showSelectedRing ? 'ring-2 ring-indigo-300 ring-inset' : ''} selected-ring cursor-pointer`}>
                                                                         {numShow(raw)}
                                                                     </td>
                                                                 );
