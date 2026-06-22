@@ -346,12 +346,27 @@
             };
 
             const importFromJSONFile = (e) => {
-                const fileReader = new FileReader();
-                if(!e.target.files[0]) return;
-                fileReader.readAsText(e.target.files[0], "UTF-8");
-                fileReader.onload = (event) => {
-                    try {
-                        const parsed = JSON.parse(event.target.value);
+    const fileReader = new FileReader();
+    if(!e.target.files[0]) return;
+    fileReader.readAsText(e.target.files[0], "UTF-8");
+    fileReader.onload = (event) => {
+        try {
+            const parsed = JSON.parse(event.target.result);
+            if(parsed.subjects && parsed.tables && parsed.order) {
+                setSubjects(parsed.subjects);
+                setOrder(parsed.order);
+                setClassCounts(parsed.classCounts || { G1: 11, G2: 11, G3: 11 });
+                setTables(parsed.tables);
+                setActiveKey(parsed.order[0] || '');
+                flash('데이터를 성공적으로 복구했습니다!');
+            } else {
+                alert('올바른 배정표 백업 파일이 아닙니다.');
+            }
+        } catch (err) {
+            alert('파일 읽기 중 오류가 발생했습니다.');
+        }
+    };
+};
                         if(parsed.subjects && parsed.tables && parsed.order) {
                             setSubjects(parsed.subjects);
                             setOrder(parsed.order);
