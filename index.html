@@ -1,615 +1,654 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2026학년도 2학기 시수배당 배정표</title>
+  
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .cursor-cell { cursor: cell; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+  <div id="root"></div>
 
-const CAREER = () => ({ id: 'career1', name: '1학년 진로와직업 지원', required: 1 });
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
 
-// PDF 2026학년도 2학기 기준 13개 교과 초기값
-const INIT_SUBJECTS = {
-  korean:    { name: '국어', g1: 4, g2: 5, g3: 4, specials: [CAREER()], teacherCount: 7 },
-  social:    { name: '사회(역사)', g1: 3, g2: 2, g3: 4, specials: [CAREER()], teacherCount: 5 },
-  ethics:    { name: '도덕', g1: 3, g2: 2, g3: 0, specials: [], teacherCount: 3 },
-  math:      { name: '수학', g1: 4, g2: 4, g3: 3, specials: [CAREER()], teacherCount: 6 },
-  science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER()], teacherCount: 6, names: ['하일민', '이황재', '이세형', '이현재', '강근구', '정수호'] },
-  tech_home: { name: '기술·가정', g1: 2, g2: 2, g3: 3, specials: [], teacherCount: 4 },
-  info:      { name: '정보', g1: 2, g2: 0, g3: 0, specials: [], teacherCount: 1 },
-  pe:        { name: '체육', g1: 3, g2: 3, g3: 3, specials: [CAREER()], teacherCount: 5 },
-  music:     { name: '음악', g1: 2, g2: 1, g3: 1, specials: [{ id: 'm1', name: '순회 나감(송촌)', required: -3 }], teacherCount: 2 },
-  art:       { name: '미술', g1: 1, g2: 2, g3: 1, specials: [{ id: 'a1', name: '순회 나감(용전)', required: -3 }], teacherCount: 2 },
-  english:   { name: '영어', g1: 3, g2: 3, g3: 4, specials: [{ id: 'e1', name: '순회 나감(법동)', required: -3 }], teacherCount: 5 },
-  career:    { name: '진로와직업', g1: 1, g2: 1, g3: 0, specials: [], teacherCount: 1 },
-  hanmun:    { name: '한문', g1: 1, g2: 2, g3: 0, specials: [{ id: 'h1', name: '순회 받음', required: 6 }, CAREER()], teacherCount: 2 },
-};
-const INIT_ORDER = ['korean', 'social', 'ethics', 'math', 'science', 'tech_home', 'info', 'pe', 'music', 'art', 'english', 'career', 'hanmun'];
+    const CAREER = () => ({ id: 'career1', name: '1학년 진로와직업 지원', required: 1 });
 
-const GRADE_META = {
-  G1: { name: '1학년', solid: 'bg-indigo-600', soft: 'bg-indigo-50', text: 'text-indigo-700' },
-  G2: { name: '2학년', solid: 'bg-emerald-600', soft: 'bg-emerald-50', text: 'text-emerald-700' },
-  G3: { name: '3학년', solid: 'bg-amber-600', soft: 'bg-amber-50', text: 'text-amber-700' },
-  ETC: { name: '기타', solid: 'bg-slate-600', soft: 'bg-slate-100', text: 'text-slate-700' },
-};
-
-let uid = 0;
-const newId = (p) => `${p}-${Date.now()}-${uid++}`;
-
-function buildTeachers(key, s) {
-  const ids = key === 'science' ? ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'] : null;
-  const out = [];
-  for (let i = 0; i < (s.teacherCount || 1); i++) out.push({ id: ids ? ids[i] : newId('t'), name: s.names ? s.names[i] : '' });
-  return out;
-}
-function buildInitial() {
-  const subjects = {}, tables = {};
-  INIT_ORDER.forEach(k => {
-    const s = INIT_SUBJECTS[k];
-    subjects[k] = { name: s.name, g1: s.g1, g2: s.g2, g3: s.g3, specials: s.specials.map(sp => ({ ...sp })) };
-    tables[k] = { teachers: buildTeachers(k, s), alloc: {} };
-  });
-  return { subjects, order: [...INIT_ORDER], classCounts: { G1: 11, G2: 11, G3: 11 }, tables, activeKey: 'science' };
-}
-
-const cellKey = (tid, cid) => `${tid}|${cid}`;
-const numShow = (n) => (n === 0 || n === undefined || n === null ? '' : String(n));
-
-export default function App() {
-  const init = useRef(buildInitial());
-  const [subjects, setSubjects] = useState(init.current.subjects);
-  const [order, setOrder] = useState(init.current.order);
-  const [classCounts, setClassCounts] = useState(init.current.classCounts);
-  const [tables, setTables] = useState(init.current.tables);
-  const [activeKey, setActiveKey] = useState(init.current.activeKey);
-
-  const [tab, setTab] = useState('all');
-  const [printMode, setPrintMode] = useState(false);
-  const [sel, setSel] = useState(null);   // {a:{r,c}, f:{r,c}}
-  const [editBuf, setEditBuf] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [hi, setHi] = useState(-1);
-  const [confirmDel, setConfirmDel] = useState(null);     // teacher delete
-  const [confirmSubDel, setConfirmSubDel] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
-  const [slotMetas, setSlotMetas] = useState([1, 2, 3, 4, 5].map(n => ({ n, savedAt: null })));
-  const [toast, setToast] = useState('');
-
-  const allocRef = useRef({});
-  const selRef = useRef(null);
-  const selectingRef = useRef(false);
-  const editBufRef = useRef(null);
-  const editSnapRef = useRef(null);
-  const gridRef = useRef(null);
-  const teacherRefs = useRef({});
-  const focusTeacher = useRef(null);
-  const saveTimer = useRef(null);
-  const loaded = useRef(false);
-
-  const subject = subjects[activeKey] || { name: '', g1: 0, g2: 0, g3: 0, specials: [] };
-  const table = tables[activeKey] || { teachers: [], alloc: {} };
-  const teachers = table.teachers;
-  const alloc = table.alloc;
-
-  useEffect(() => { allocRef.current = alloc; }, [alloc]);
-
-  const allColumns = useMemo(() => {
-    const cols = [];
-    [['G1', subject.g1], ['G2', subject.g2], ['G3', subject.g3]].forEach(([gid, req]) => {
-      for (let c = 1; c <= classCounts[gid]; c++) cols.push({ id: `${gid}-${c}`, short: `${c}반`, label: `${GRADE_META[gid].name} ${c}반`, gradeId: gid, required: req });
-    });
-    (subject.specials || []).forEach(s => cols.push({ id: s.id, short: s.name, label: s.name, gradeId: 'ETC', required: s.required }));
-    return cols;
-  }, [subject, classCounts]);
-
-  const visibleColumns = useMemo(() => {
-    if (printMode || tab === 'all') return allColumns;
-    if (tab === 'etc') return allColumns.filter(c => c.gradeId === 'ETC');
-    return allColumns.filter(c => c.gradeId === `G${tab}`);
-  }, [allColumns, tab, printMode]);
-
-  const headerGroups = useMemo(() => {
-    const g = []; let i = 0;
-    while (i < visibleColumns.length) {
-      const gid = visibleColumns[i].gradeId; let span = 0;
-      while (i + span < visibleColumns.length && visibleColumns[i + span].gradeId === gid) span++;
-      g.push({ gid, span, req: visibleColumns[i].required }); i += span;
-    }
-    return g;
-  }, [visibleColumns]);
-
-  // ---- table mutators ----
-  const setTable = (mut) => setTables(tb => ({ ...tb, [activeKey]: mut(tb[activeKey]) }));
-  const setAllocLive = (a) => { allocRef.current = a; setTable(t => ({ ...t, alloc: a })); };
-
-  const resetHistory = (a) => { setHistory([JSON.stringify(a)]); setHi(0); };
-  const pushHistory = () => {
-    const s = JSON.stringify(allocRef.current);
-    setHistory(h => {
-      const trimmed = h.slice(0, hi + 1);
-      if (trimmed[trimmed.length - 1] === s) return h;
-      const nh = [...trimmed, s];
-      setHi(nh.length - 1);
-      return nh;
-    });
-  };
-  const undo = () => { if (hi > 0) { const a = JSON.parse(history[hi - 1]); setAllocLive(a); setHi(hi - 1); } };
-  const redo = () => { if (hi < history.length - 1) { const a = JSON.parse(history[hi + 1]); setAllocLive(a); setHi(hi + 1); } };
-
-  useEffect(() => { resetHistory(alloc); }, [activeKey]);
-  useEffect(() => { selRef.current = sel; }, [sel]);
-  // 탭/과목/열 변경 시 선택 해제
-  useEffect(() => { setSel(null); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }, [tab, activeKey]);
-
-  // ---- 엑셀형 범위 선택 + 입력 ----
-  const cellAt = (r, c) => ({ tid: teachers[r]?.id, cid: visibleColumns[c]?.id });
-  const rectCells = () => {
-    const sx = selRef.current; if (!sx) return [];
-    const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
-    const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
-    const out = [];
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellAt(r, c));
-    return out;
-  };
-  const applyFill = (val, base) => {
-    const a = { ...base };
-    rectCells().forEach(({ tid, cid }) => { if (tid && cid) a[tid] = { ...(a[tid] || {}), [cid]: val }; });
-    return a;
-  };
-
-  const commitEdit = () => {
-    if (editBufRef.current != null) { editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; pushHistory(); }
-  };
-  const cancelEdit = () => {
-    if (editBufRef.current != null) { setAllocLive(editSnapRef.current); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }
-  };
-  const typeChar = (ch) => {
-    let b = editBufRef.current;
-    if (b == null) { editSnapRef.current = JSON.parse(JSON.stringify(allocRef.current)); b = ''; }
-    if (ch === '-') { if (b === '') b = '-'; }
-    else b = b + ch;
-    editBufRef.current = b; setEditBuf(b);
-    const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
-    setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
-  };
-  const backspace = () => {
-    if (editBufRef.current != null) {
-      const b = editBufRef.current.slice(0, -1);
-      editBufRef.current = b; setEditBuf(b);
-      const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
-      setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
-    } else { setAllocLive(applyFill(0, allocRef.current)); pushHistory(); }
-  };
-  const clearSel = () => { commitEdit(); setAllocLive(applyFill(0, allocRef.current)); pushHistory(); };
-  const moveActive = (dr, dc, extend) => {
-    const sx = selRef.current; if (!sx) return;
-    const R = teachers.length, C = visibleColumns.length;
-    const r = Math.min(Math.max(sx.f.r + dr, 0), R - 1);
-    const c = Math.min(Math.max(sx.f.c + dc, 0), C - 1);
-    setSel(extend ? { a: sx.a, f: { r, c } } : { a: { r, c }, f: { r, c } });
-  };
-
-  const onCellDown = (e, r, c) => {
-    if (printMode) return;
-    e.preventDefault();
-    if (gridRef.current) gridRef.current.focus();
-    commitEdit();
-    if (e.shiftKey && selRef.current) setSel({ a: selRef.current.a, f: { r, c } });
-    else setSel({ a: { r, c }, f: { r, c } });
-    selectingRef.current = true;
-  };
-  const onCellEnter = (r, c) => {
-    if (selectingRef.current) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
-  };
-
-  useEffect(() => {
-    const up = () => { selectingRef.current = false; };
-    window.addEventListener('mouseup', up);
-    return () => window.removeEventListener('mouseup', up);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e) => {
-      const tag = e.target.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-      if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
-        e.preventDefault(); commitEdit(); (e.key.toLowerCase() === 'z' ? undo : redo)(); return;
-      }
-      if (!selRef.current) return;
-      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); typeChar(e.key); return; }
-      if (e.key === '-') { e.preventDefault(); typeChar('-'); return; }
-      if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
-      if (e.key === 'Delete') { e.preventDefault(); clearSel(); return; }
-      if (e.key === 'Enter') { e.preventDefault(); commitEdit(); moveActive(1, 0); return; }
-      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
-      if (e.key === 'Tab') { e.preventDefault(); commitEdit(); moveActive(0, e.shiftKey ? -1 : 1); return; }
-      if (e.key.startsWith('Arrow')) {
-        e.preventDefault(); commitEdit();
-        const map = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-        const [dr, dc] = map[e.key]; moveActive(dr, dc, e.shiftKey);
-      }
+    const INIT_SUBJECTS = {
+      korean:    { name: '국어', g1: 4, g2: 5, g3: 4, specials: [CAREER()], teacherCount: 7 },
+      social:    { name: '사회(역사)', g1: 3, g2: 2, g3: 4, specials: [CAREER()], teacherCount: 5 },
+      ethics:    { name: '도덕', g1: 3, g2: 2, g3: 0, specials: [], teacherCount: 3 },
+      math:      { name: '수학', g1: 4, g2: 4, g3: 3, specials: [CAREER()], teacherCount: 6 },
+      science:   { name: '과학', g1: 3, g2: 4, g3: 4, specials: [CAREER()], teacherCount: 6, names: ['하일민', '이황재', '이세형', '이현재', '강근구', '정수호'] },
+      tech_home: { name: '기술·가정', g1: 2, g2: 2, g3: 3, specials: [], teacherCount: 4 },
+      info:      { name: '정보', g1: 2, g2: 0, g3: 0, specials: [], teacherCount: 1 },
+      pe:        { name: '체육', g1: 3, g2: 3, g3: 3, specials: [CAREER()], teacherCount: 5 },
+      music:     { name: '음악', g1: 2, g2: 1, g3: 1, specials: [{ id: 'm1', name: '순회 나감(송촌)', required: -3 }], teacherCount: 2 },
+      art:       { name: '미술', g1: 1, g2: 2, g3: 1, specials: [{ id: 'a1', name: '순회 나감(용전)', required: -3 }], teacherCount: 2 },
+      english:   { name: '영어', g1: 3, g2: 3, g3: 4, specials: [{ id: 'e1', name: '순회 나감(법동)', required: -3 }], teacherCount: 5 },
+      career:    { name: '진로와직업', g1: 1, g2: 1, g3: 0, specials: [], teacherCount: 1 },
+      hanmun:    { name: '한문', g1: 1, g2: 2, g3: 0, specials: [{ id: 'h1', name: '순회 받음', required: 6 }, CAREER()], teacherCount: 2 },
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [hi, history, teachers, visibleColumns]);
+    const INIT_ORDER = ['korean', 'social', 'ethics', 'math', 'science', 'tech_home', 'info', 'pe', 'music', 'art', 'english', 'career', 'hanmun'];
 
-  useEffect(() => {
-    if (focusTeacher.current && teacherRefs.current[focusTeacher.current]) {
-      teacherRefs.current[focusTeacher.current].focus();
-      focusTeacher.current = null;
+    const GRADE_META = {
+      G1: { name: '1학년', solid: 'bg-indigo-600', soft: 'bg-indigo-50', text: 'text-indigo-700' },
+      G2: { name: '2학년', solid: 'bg-emerald-600', soft: 'bg-emerald-50', text: 'text-emerald-700' },
+      G3: { name: '3학년', solid: 'bg-amber-600', soft: 'bg-amber-50', text: 'text-amber-700' },
+      ETC: { name: '기타', solid: 'bg-slate-600', soft: 'bg-slate-100', text: 'text-slate-700' },
+    };
+
+    let uid = 0;
+    const newId = (p) => `${p}-${Date.now()}-${uid++}`;
+
+    function buildTeachers(key, s) {
+      const ids = key === 'science' ? ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'] : null;
+      const out = [];
+      for (let i = 0; i < (s.teacherCount || 1); i++) out.push({ id: ids ? ids[i] : newId('t'), name: s.names ? s.names[i] : '' });
+      return out;
     }
-  }, [teachers]);
+    function buildInitial() {
+      const subjects = {}, tables = {};
+      INIT_ORDER.forEach(k => {
+        const s = INIT_SUBJECTS[k];
+        subjects[k] = { name: s.name, g1: s.g1, g2: s.g2, g3: s.g3, specials: s.specials.map(sp => ({ ...sp })) };
+        tables[k] = { teachers: buildTeachers(k, s), alloc: {} };
+      });
+      return { subjects, order: [...INIT_ORDER], classCounts: { G1: 11, G2: 11, G3: 11 }, tables, activeKey: 'science' };
+    }
 
-  // ---- teachers ----
-  const renameTeacher = (id, name) => setTable(t => ({ ...t, teachers: t.teachers.map(x => x.id === id ? { ...x, name } : x) }));
-  const addTeacher = () => {
-    const id = newId('t');
-    focusTeacher.current = id;
-    setTable(t => ({ ...t, teachers: [...t.teachers, { id, name: '' }] }));
-  };
-  const reallyRemoveTeacher = (id) => {
-    setSel(null);
-    setTable(t => { const a = { ...t.alloc }; delete a[id]; return { ...t, teachers: t.teachers.filter(x => x.id !== id), alloc: a }; });
-    setConfirmDel(null);
-    setTimeout(pushHistory, 0);
-  };
+    const cellKey = (tid, cid) => `${tid}|${cid}`;
+    const numShow = (n) => (n === 0 || n === undefined || n === null ? '' : String(n));
 
-  // ---- subjects ----
-  const updateSubject = (patch) => setSubjects(s => ({ ...s, [activeKey]: { ...s[activeKey], ...patch } }));
-  const addSubject = () => {
-    const key = newId('sub');
-    const id = newId('t');
-    setSubjects(s => ({ ...s, [key]: { name: '새 과목', g1: 0, g2: 0, g3: 0, specials: [] } }));
-    setOrder(o => [...o, key]);
-    setTables(tb => ({ ...tb, [key]: { teachers: [{ id, name: '' }], alloc: {} } }));
-    setActiveKey(key);
-  };
-  const reallyRemoveSubject = () => {
-    const key = activeKey;
-    const remaining = order.filter(k => k !== key);
-    setOrder(remaining);
-    setSubjects(s => { const n = { ...s }; delete n[key]; return n; });
-    setTables(tb => { const n = { ...tb }; delete n[key]; return n; });
-    setActiveKey(remaining[0] || '');
-    setConfirmSubDel(false);
-  };
-  const addSpecial = () => updateSubject({ specials: [...(subject.specials || []), { id: newId('sp'), name: '기타시수', required: 0 }] });
-  const updateSpecial = (id, patch) => updateSubject({ specials: subject.specials.map(s => s.id === id ? { ...s, ...patch } : s) });
-  const removeSpecial = (id) => updateSubject({ specials: subject.specials.filter(s => s.id !== id) });
+    function App() {
+      const init = useRef(buildInitial());
+      const [subjects, setSubjects] = useState(init.current.subjects);
+      const [order, setOrder] = useState(init.current.order);
+      const [classCounts, setClassCounts] = useState(init.current.classCounts);
+      const [tables, setTables] = useState(init.current.tables);
+      const [activeKey, setActiveKey] = useState(init.current.activeKey);
 
-  const setClassCount = (gid, n) => setClassCounts(c => ({ ...c, [gid]: Math.max(1, Math.min(20, n || 1)) }));
+      const [tab, setTab] = useState('all');
+      const [printMode, setPrintMode] = useState(false);
+      const [sel, setSel] = useState(null);
+      const [editBuf, setEditBuf] = useState(null);
+      const [history, setHistory] = useState([]);
+      const [hi, setHi] = useState(-1);
+      const [confirmDel, setConfirmDel] = useState(null);
+      const [confirmSubDel, setConfirmSubDel] = useState(false);
+      const [saveOpen, setSaveOpen] = useState(false);
+      const [slotMetas, setSlotMetas] = useState([1, 2, 3, 4, 5].map(n => ({ n, savedAt: null })));
+      const [toast, setToast] = useState('');
 
-  // ---- totals ----
-  const teacherTotal = (id) => allColumns.reduce((s, c) => s + (alloc[id]?.[c.id] || 0), 0);
-  const colTotal = (cid) => teachers.reduce((s, t) => s + (alloc[t.id]?.[cid] || 0), 0);
-  const grand = teachers.reduce((s, t) => s + teacherTotal(t.id), 0);
-  const target = allColumns.reduce((s, c) => s + c.required, 0);
+      const allocRef = useRef({});
+      const selRef = useRef(null);
+      const selectingRef = useRef(false);
+      const editBufRef = useRef(null);
+      const editSnapRef = useRef(null);
+      const gridRef = useRef(null);
+      const teacherRefs = useRef({});
+      const focusTeacher = useRef(null);
+      const saveTimer = useRef(null);
+      const loaded = useRef(false);
 
-  // ---- persistence ----
-  const snapshot = () => ({ subjects, order, classCounts, tables, activeKey });
-  const applyState = (st) => {
-    if (!st) return;
-    setSubjects(st.subjects); setOrder(st.order); setClassCounts(st.classCounts);
-    setTables(st.tables); setActiveKey(st.activeKey && st.subjects[st.activeKey] ? st.activeKey : st.order[0]);
-  };
-  const storageOK = typeof window !== 'undefined' && window.storage;
+      const subject = subjects[activeKey] || { name: '', g1: 0, g2: 0, g3: 0, specials: [] };
+      const table = tables[activeKey] || { teachers: [], alloc: {} };
+      const teachers = table.teachers;
+      const alloc = table.alloc;
 
-  useEffect(() => {
-    (async () => {
-      if (!storageOK) { loaded.current = true; return; }
-      try { const r = await window.storage.get('auto'); if (r && r.value) applyState(JSON.parse(r.value)); } catch (e) {}
-      try {
-        const metas = await Promise.all([1, 2, 3, 4, 5].map(async n => {
-          try { const r = await window.storage.get(`slot${n}`); return { n, savedAt: r && r.value ? JSON.parse(r.value).savedAt : null }; }
-          catch (e) { return { n, savedAt: null }; }
-        }));
-        setSlotMetas(metas);
-      } catch (e) {}
-      loaded.current = true;
-    })();
-  }, []);
+      useEffect(() => { allocRef.current = alloc; }, [alloc]);
 
-  useEffect(() => {
-    if (!storageOK || !loaded.current) return;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      try { window.storage.set('auto', JSON.stringify(snapshot())); } catch (e) {}
-    }, 700);
-  }, [subjects, order, classCounts, tables, activeKey]);
+      const allColumns = useMemo(() => {
+        const cols = [];
+        [['G1', subject.g1], ['G2', subject.g2], ['G3', subject.g3]].forEach(([gid, req]) => {
+          for (let c = 1; c <= classCounts[gid]; c++) cols.push({ id: `${gid}-${c}`, short: `${c}반`, label: `${GRADE_META[gid].name} ${c}반`, gradeId: gid, required: req });
+        });
+        (subject.specials || []).forEach(s => cols.push({ id: s.id, short: s.name, label: s.name, gradeId: 'ETC', required: s.required }));
+        return cols;
+      }, [subject, classCounts]);
 
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 1600); };
-  const saveSlot = async (n) => {
-    if (!storageOK) { flash('저장 기능을 쓸 수 없어요'); return; }
-    const savedAt = new Date().toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    try { await window.storage.set(`slot${n}`, JSON.stringify({ ...snapshot(), savedAt })); setSlotMetas(m => m.map(x => x.n === n ? { ...x, savedAt } : x)); flash(`슬롯 ${n}에 저장했어요`); }
-    catch (e) { flash('저장에 실패했어요'); }
-  };
-  const loadSlot = async (n) => {
-    if (!storageOK) return;
-    try { const r = await window.storage.get(`slot${n}`); if (r && r.value) { applyState(JSON.parse(r.value)); flash(`슬롯 ${n}을 불러왔어요`); setSaveOpen(false); } else flash('빈 슬롯이에요'); }
-    catch (e) { flash('불러오기에 실패했어요'); }
-  };
-  const clearSlot = async (n) => {
-    if (!storageOK) return;
-    try { await window.storage.delete(`slot${n}`); setSlotMetas(m => m.map(x => x.n === n ? { ...x, savedAt: null } : x)); flash(`슬롯 ${n}을 비웠어요`); }
-    catch (e) {}
-  };
+      const visibleColumns = useMemo(() => {
+        if (printMode || tab === 'all') return allColumns;
+        if (tab === 'etc') return allColumns.filter(c => c.gradeId === 'ETC');
+        return allColumns.filter(c => c.gradeId === `G${tab}`);
+      }, [allColumns, tab, printMode]);
 
-  const downloadCSV = () => {
-    let csv = '\uFEFF';
-    csv += ['담당교사', ...allColumns.map(c => c.label), '교사합계'].join(',') + '\n';
-    teachers.forEach(t => { csv += [t.name || '(이름없음)', ...allColumns.map(c => alloc[t.id]?.[c.id] || 0), teacherTotal(t.id)].join(',') + '\n'; });
-    csv += ['목표시수', ...allColumns.map(c => c.required), ''].join(',') + '\n';
-    csv += ['배정합계', ...allColumns.map(c => colTotal(c.id)), grand].join(',') + '\n';
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    link.download = `2026_2학기_시수배당_${subject.name}.csv`;
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  };
+      const headerGroups = useMemo(() => {
+        const g = []; let i = 0;
+        while (i < visibleColumns.length) {
+          const gid = visibleColumns[i].gradeId; let span = 0;
+          while (i + span < visibleColumns.length && visibleColumns[i + span].gradeId === gid) span++;
+          g.push({ gid, span, req: visibleColumns[i].required }); i += span;
+        }
+        return g;
+      }, [visibleColumns]);
 
-  const cellStyle = (v) => {
-    if (v === 1) return 'bg-sky-100 text-sky-800';
-    if (v === 2) return 'bg-violet-100 text-violet-800';
-    if (v === 3) return 'bg-emerald-100 text-emerald-800';
-    if (v >= 4) return 'bg-amber-100 text-amber-900';
-    if (v < 0) return 'bg-rose-100 text-rose-800';
-    return 'bg-white text-slate-400';
-  };
-  const loadColor = (t) => t === 0 ? 'bg-slate-100 text-slate-400' : t > 22 ? 'bg-rose-100 text-rose-700' : t < 16 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+      const setTable = (mut) => setTables(tb => ({ ...tb, [activeKey]: mut(tb[activeKey]) }));
+      const setAllocLive = (a) => { allocRef.current = a; setTable(t => ({ ...t, alloc: a })); };
 
-  const tabs = [
-    { key: 'all', gid: null, label: '전체보기' },
-    { key: '1', gid: 'G1', label: `1학년·${subject.g1}h` },
-    { key: '2', gid: 'G2', label: `2학년·${subject.g2}h` },
-    { key: '3', gid: 'G3', label: `3학년·${subject.g3}h` },
-    ...((subject.specials || []).length ? [{ key: 'etc', gid: 'ETC', label: '기타시수' }] : []),
-  ];
+      const resetHistory = (a) => { setHistory([JSON.stringify(a)]); setHi(0); };
+      const pushHistory = () => {
+        const s = JSON.stringify(allocRef.current);
+        setHistory(h => {
+          const trimmed = h.slice(0, hi + 1);
+          if (trimmed[trimmed.length - 1] === s) return h;
+          const nh = [...trimmed, s];
+          setHi(nh.length - 1);
+          return nh;
+        });
+      };
+      const undo = () => { if (hi > 0) { const a = JSON.parse(history[hi - 1]); setAllocLive(a); setHi(hi - 1); } };
+      const redo = () => { if (hi < history.length - 1) { const a = JSON.parse(history[hi + 1]); setAllocLive(a); setHi(hi + 1); } };
 
-  const numInput = "w-14 border border-slate-300 rounded-lg px-2 py-1 text-sm text-center font-semibold focus:ring-2 focus:ring-indigo-500 outline-none";
+      useEffect(() => { resetHistory(alloc); }, [activeKey]);
+      useEffect(() => { selRef.current = sel; }, [sel]);
+      useEffect(() => { setSel(null); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }, [tab, activeKey]);
 
-  return (
-    <div className={`min-h-screen font-sans select-none ${printMode ? 'bg-white' : 'bg-slate-100'} text-slate-800`}>
-      {/* 헤더 */}
-      {!printMode && (
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-          <div className="max-w-screen-2xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black">시</div>
-              <div>
-                <h1 className="text-lg font-bold text-slate-900 leading-tight">시수배당 배정표</h1>
-                <p className="text-xs text-slate-500">2026학년도 2학기 · {subject.name}</p>
+      const cellAt = (r, c) => ({ tid: teachers[r]?.id, cid: visibleColumns[c]?.id });
+      const rectCells = () => {
+        const sx = selRef.current; if (!sx) return [];
+        const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
+        const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
+        const out = [];
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellAt(r, c));
+        return out;
+      };
+      const applyFill = (val, base) => {
+        const a = { ...base };
+        rectCells().forEach(({ tid, cid }) => { if (tid && cid) a[tid] = { ...(a[tid] || {}), [cid]: val }; });
+        return a;
+      };
+
+      const commitEdit = () => {
+        if (editBufRef.current != null) { editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; pushHistory(); }
+      };
+      const cancelEdit = () => {
+        if (editBufRef.current != null) { setAllocLive(editSnapRef.current); editBufRef.current = null; setEditBuf(null); editSnapRef.current = null; }
+      };
+      const typeChar = (ch) => {
+        let b = editBufRef.current;
+        if (b == null) { editSnapRef.current = JSON.parse(JSON.stringify(allocRef.current)); b = ''; }
+        if (ch === '-') { if (b === '') b = '-'; }
+        else b = b + ch;
+        editBufRef.current = b; setEditBuf(b);
+        const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
+        setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
+      };
+      const backspace = () => {
+        if (editBufRef.current != null) {
+          const b = editBufRef.current.slice(0, -1);
+          editBufRef.current = b; setEditBuf(b);
+          const val = (b === '' || b === '-') ? 0 : parseInt(b, 10);
+          setAllocLive(applyFill(isNaN(val) ? 0 : val, editSnapRef.current));
+        } else { setAllocLive(applyFill(0, allocRef.current)); pushHistory(); }
+      };
+      const clearSel = () => { commitEdit(); setAllocLive(applyFill(0, allocRef.current)); pushHistory(); };
+      const moveActive = (dr, dc, extend) => {
+        const sx = selRef.current; if (!sx) return;
+        const R = teachers.length, C = visibleColumns.length;
+        const r = Math.min(Math.max(sx.f.r + dr, 0), R - 1);
+        const c = Math.min(Math.max(sx.f.c + dc, 0), C - 1);
+        setSel(extend ? { a: sx.a, f: { r, c } } : { a: { r, c }, f: { r, c } });
+      };
+
+      const onCellDown = (e, r, c) => {
+        if (printMode) return;
+        e.preventDefault();
+        if (gridRef.current) gridRef.current.focus();
+        commitEdit();
+        if (e.shiftKey && selRef.current) setSel({ a: selRef.current.a, f: { r, c } });
+        else setSel({ a: { r, c }, f: { r, c } });
+        selectingRef.current = true;
+      };
+      const onCellEnter = (r, c) => {
+        if (selectingRef.current) setSel(s => (s ? { a: s.a, f: { r, c } } : { a: { r, c }, f: { r, c } }));
+      };
+
+      useEffect(() => {
+        const up = () => { selectingRef.current = false; };
+        window.addEventListener('mouseup', up);
+        return () => window.removeEventListener('mouseup', up);
+      }, []);
+
+      useEffect(() => {
+        const onKey = (e) => {
+          const tag = e.target.tagName;
+          if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+          if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
+            e.preventDefault(); commitEdit(); (e.key.toLowerCase() === 'z' ? undo : redo)(); return;
+          }
+          if (!selRef.current) return;
+          if (/^[0-9]$/.test(e.key)) { e.preventDefault(); typeChar(e.key); return; }
+          if (e.key === '-') { e.preventDefault(); typeChar('-'); return; }
+          if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
+          if (e.key === 'Delete') { e.preventDefault(); clearSel(); return; }
+          if (e.key === 'Enter') { e.preventDefault(); commitEdit(); moveActive(1, 0); return; }
+          if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
+          if (e.key === 'Tab') { e.preventDefault(); commitEdit(); moveActive(0, e.shiftKey ? -1 : 1); return; }
+          if (e.key.startsWith('Arrow')) {
+            e.preventDefault(); commitEdit();
+            const map = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+            const [dr, dc] = map[e.key]; moveActive(dr, dc, e.shiftKey);
+          }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [hi, history, teachers, visibleColumns]);
+
+      useEffect(() => {
+        if (focusTeacher.current && teacherRefs.current[focusTeacher.current]) {
+          teacherRefs.current[focusTeacher.current].focus();
+          focusTeacher.current = null;
+        }
+      }, [teachers]);
+
+      const renameTeacher = (id, name) => setTable(t => ({ ...t, teachers: t.teachers.map(x => x.id === id ? { ...x, name } : x) }));
+      const addTeacher = () => {
+        const id = newId('t');
+        focusTeacher.current = id;
+        setTable(t => ({ ...t, teachers: [...t.teachers, { id, name: '' }] }));
+      };
+      const reallyRemoveTeacher = (id) => {
+        setSel(null);
+        setTable(t => { const a = { ...t.alloc }; delete a[id]; return { ...t, teachers: t.teachers.filter(x => x.id !== id), alloc: a }; });
+        setConfirmDel(null);
+        setTimeout(pushHistory, 0);
+      };
+
+      const updateSubject = (patch) => setSubjects(s => ({ ...s, [activeKey]: { ...s[activeKey], ...patch } }));
+      const addSubject = () => {
+        const key = newId('sub');
+        const id = newId('t');
+        setSubjects(s => ({ ...s, [key]: { name: '새 과목', g1: 0, g2: 0, g3: 0, specials: [] } }));
+        setOrder(o => [...o, key]);
+        setTables(tb => ({ ...tb, [key]: { teachers: [{ id, name: '' }], alloc: {} } }));
+        setActiveKey(key);
+      };
+      const reallyRemoveSubject = () => {
+        const key = activeKey;
+        const remaining = order.filter(k => k !== key);
+        setOrder(remaining);
+        setSubjects(s => { const n = { ...s }; delete n[key]; return n; });
+        setTables(tb => { const n = { ...tb }; delete n[key]; return n; });
+        setActiveKey(remaining[0] || '');
+        setConfirmSubDel(false);
+      };
+      const addSpecial = () => updateSubject({ specials: [...(subject.specials || []), { id: newId('sp'), name: '기타시수', required: 0 }] });
+      const updateSpecial = (id, patch) => updateSubject({ specials: subject.specials.map(s => s.id === id ? { ...s, ...patch } : s) });
+      const removeSpecial = (id) => updateSubject({ specials: subject.specials.filter(s => s.id !== id) });
+
+      const setClassCount = (gid, n) => setClassCounts(c => ({ ...c, [gid]: Math.max(1, Math.min(20, n || 1)) }));
+
+      const teacherTotal = (id) => allColumns.reduce((s, c) => s + (alloc[id]?.[c.id] || 0), 0);
+      const colTotal = (cid) => teachers.reduce((s, t) => s + (alloc[t.id]?.[cid] || 0), 0);
+      const grand = teachers.reduce((s, t) => s + teacherTotal(t.id), 0);
+      const target = allColumns.reduce((s, c) => s + c.required, 0);
+
+      const snapshot = () => ({ subjects, order, classCounts, tables, activeKey });
+      const applyState = (st) => {
+        if (!st) return;
+        setSubjects(st.subjects); setOrder(st.order); setClassCounts(st.classCounts);
+        setTables(st.tables); setActiveKey(st.activeKey && st.subjects[st.activeKey] ? st.activeKey : st.order[0]);
+      };
+
+      // 🔍 window.storage 버그를 window.localStorage 표준 API로 전면 수정!
+      const storageOK = typeof window !== 'undefined' && window.localStorage;
+
+      useEffect(() => {
+        (() => {
+          if (!storageOK) { loaded.current = true; return; }
+          try { 
+            const val = window.localStorage.getItem('auto'); 
+            if (val) applyState(JSON.parse(val)); 
+          } catch (e) {}
+          try {
+            const metas = [1, 2, 3, 4, 5].map(n => {
+              try { 
+                const val = window.localStorage.getItem(`slot${n}`); 
+                return { n, savedAt: val ? JSON.parse(val).savedAt : null }; 
+              } catch (e) { 
+                return { n, savedAt: null }; 
+              }
+            });
+            setSlotMetas(metas);
+          } catch (e) {}
+          loaded.current = true;
+        })();
+      }, []);
+
+      useEffect(() => {
+        if (!storageOK || !loaded.current) return;
+        clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          try { 
+            window.localStorage.setItem('auto', JSON.stringify(snapshot())); 
+          } catch (e) {}
+        }, 700);
+      }, [subjects, order, classCounts, tables, activeKey]);
+
+      const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 1600); };
+      const saveSlot = async (n) => {
+        if (!storageOK) { flash('저장 기능을 쓸 수 없어요'); return; }
+        const savedAt = new Date().toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        try { 
+          window.localStorage.setItem(`slot${n}`, JSON.stringify({ ...snapshot(), savedAt })); 
+          setSlotMetas(m => m.map(x => x.n === n ? { ...x, savedAt } : x)); 
+          flash(`슬롯 ${n}에 저장했어요`); 
+        } catch (e) { 
+          flash('저장에 실패했어요'); 
+        }
+      };
+      const loadSlot = async (n) => {
+        if (!storageOK) return;
+        try { 
+          const val = window.localStorage.getItem(`slot${n}`); 
+          if (val) { 
+            applyState(JSON.parse(val)); 
+            flash(`슬롯 ${n}을 불러왔어요`); 
+            setSaveOpen(false); 
+          } else flash('빈 슬롯이에요'); 
+        } catch (e) { 
+          flash('불러오기에 실패했어요'); 
+        }
+      };
+      const clearSlot = async (n) => {
+        if (!storageOK) return;
+        try { 
+          window.localStorage.removeItem(`slot${n}`); 
+          setSlotMetas(m => m.map(x => x.n === n ? { ...x, savedAt: null } : x)); 
+          flash(`슬롯 ${n}을 비웠어요`); 
+        } catch (e) {}
+      };
+
+      const downloadCSV = () => {
+        let csv = '\uFEFF';
+        csv += ['담당교사', ...allColumns.map(c => c.label), '교사합계'].join(',') + '\n';
+        teachers.forEach(t => { csv += [t.name || '(이름없음)', ...allColumns.map(c => alloc[t.id]?.[c.id] || 0), teacherTotal(t.id)].join(',') + '\n'; });
+        csv += ['목표시수', ...allColumns.map(c => c.required), ''].join(',') + '\n';
+        csv += ['배정합계', ...allColumns.map(c => colTotal(c.id)), grand].join(',') + '\n';
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+        link.download = `2026_2학기_시수배당_${subject.name}.csv`;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      };
+
+      const cellStyle = (v) => {
+        if (v === 1) return 'bg-sky-100 text-sky-800';
+        if (v === 2) return 'bg-violet-100 text-violet-800';
+        if (v === 3) return 'bg-emerald-100 text-emerald-800';
+        if (v >= 4) return 'bg-amber-100 text-amber-900';
+        if (v < 0) return 'bg-rose-100 text-rose-800';
+        return 'bg-white text-slate-400';
+      };
+      const loadColor = (t) => t === 0 ? 'bg-slate-100 text-slate-400' : t > 22 ? 'bg-rose-100 text-rose-700' : t < 16 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+
+      const tabs = [
+        { key: 'all', gid: null, label: '전체보기' },
+        { key: '1', gid: 'G1', label: `1학년·${subject.g1}h` },
+        { key: '2', gid: 'G2', label: `2학년·${subject.g2}h` },
+        { key: '3', gid: 'G3', label: `3학년·${subject.g3}h` },
+        ...((subject.specials || []).length ? [{ key: 'etc', gid: 'ETC', label: '기타시수' }] : []),
+      ];
+
+      const numInput = "w-14 border border-slate-300 rounded-lg px-2 py-1 text-sm text-center font-semibold focus:ring-2 focus:ring-indigo-500 outline-none";
+
+      return (
+        <div className={`min-h-screen font-sans select-none ${printMode ? 'bg-white' : 'bg-slate-100'} text-slate-800`}>
+          {!printMode && (
+            <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+              <div className="max-w-screen-2xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black">시</div>
+                  <div>
+                    <h1 className="text-lg font-bold text-slate-900 leading-tight">시수배당 배정표</h1>
+                    <p className="text-xs text-slate-500">2026학년도 2학기 · {subject.name}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold text-slate-600 bg-slate-100 rounded-lg px-3 py-2">배정 <span className="text-indigo-700">{grand}</span> / {target}h</span>
+                  <button onClick={() => setSaveOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors">💾 저장 / 불러오기</button>
+                </div>
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-bold text-slate-600 bg-slate-100 rounded-lg px-3 py-2">배정 <span className="text-indigo-700">{grand}</span> / {target}h</span>
-              <button onClick={() => setSaveOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors">💾 저장 / 불러오기</button>
-            </div>
-          </div>
-        </header>
-      )}
+            </header>
+          )}
 
-      <main className="max-w-screen-2xl mx-auto px-4 py-4">
-        {/* 과목 설정 카드 */}
-        {!printMode && (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <div className="flex items-center gap-2">
-              <select value={activeKey} onChange={(e) => setActiveKey(e.target.value)}
-                className="bg-white border border-slate-300 text-sm rounded-lg px-3 py-1.5 font-bold focus:ring-2 focus:ring-indigo-500 outline-none">
-                {order.map(k => <option key={k} value={k}>{subjects[k]?.name}</option>)}
-              </select>
-              <input value={subject.name} onChange={(e) => updateSubject({ name: e.target.value })}
-                className="w-32 border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="과목명" />
-              <button onClick={addSubject} className="text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5">+ 새 과목</button>
-              <button onClick={() => setConfirmSubDel(true)} className="text-sm font-bold text-rose-500 hover:bg-rose-50 border border-rose-200 rounded-lg px-2 py-1.5">과목 삭제</button>
-            </div>
+          <main className="max-w-screen-2xl mx-auto px-4 py-4">
+            {!printMode && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+                <div className="flex items-center gap-2">
+                  <select value={activeKey} onChange={(e) => setActiveKey(e.target.value)}
+                    className="bg-white border border-slate-300 text-sm rounded-lg px-3 py-1.5 font-bold focus:ring-2 focus:ring-indigo-500 outline-none">
+                    {order.map(k => <option key={k} value={k}>{subjects[k]?.name}</option>)}
+                  </select>
+                  <input value={subject.name} onChange={(e) => updateSubject({ name: e.target.value })}
+                    className="w-32 border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="과목명" />
+                  <button onClick={addSubject} className="text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5">+ 새 과목</button>
+                  <button onClick={() => setConfirmSubDel(true)} className="text-sm font-bold text-rose-500 hover:bg-rose-50 border border-rose-200 rounded-lg px-2 py-1.5">과목 삭제</button>
+                </div>
 
-            <div className="flex items-center gap-2 text-sm">
-              <span className="font-bold text-slate-500">학년별 시수</span>
-              <label className="flex items-center gap-1"><span className="text-slate-500">1</span>
-                <input type="number" min="0" max="10" value={subject.g1} onChange={(e) => updateSubject({ g1: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
-              <label className="flex items-center gap-1"><span className="text-slate-500">2</span>
-                <input type="number" min="0" max="10" value={subject.g2} onChange={(e) => updateSubject({ g2: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
-              <label className="flex items-center gap-1"><span className="text-slate-500">3</span>
-                <input type="number" min="0" max="10" value={subject.g3} onChange={(e) => updateSubject({ g3: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
-            </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-bold text-slate-500">학년별 시수</span>
+                  <label className="flex items-center gap-1"><span className="text-slate-500">1</span>
+                    <input type="number" min="0" max="10" value={subject.g1} onChange={(e) => updateSubject({ g1: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
+                  <label className="flex items-center gap-1"><span className="text-slate-500">2</span>
+                    <input type="number" min="0" max="10" value={subject.g2} onChange={(e) => updateSubject({ g2: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
+                  <label className="flex items-center gap-1"><span className="text-slate-500">3</span>
+                    <input type="number" min="0" max="10" value={subject.g3} onChange={(e) => updateSubject({ g3: Math.max(0, +e.target.value || 0) })} className={numInput} /></label>
+                </div>
 
-            <div className="flex items-center gap-2 text-sm">
-              <span className="font-bold text-slate-500">학급 수</span>
-              {['G1', 'G2', 'G3'].map(g => (
-                <label key={g} className="flex items-center gap-1"><span className="text-slate-500">{g[1]}</span>
-                  <input type="number" min="1" max="20" value={classCounts[g]} onChange={(e) => setClassCount(g, parseInt(e.target.value, 10))} className={numInput} /></label>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 text-sm flex-wrap">
-              <span className="font-bold text-slate-500">기타시수</span>
-              {(subject.specials || []).map(sp => (
-                <span key={sp.id} className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-1 py-1">
-                  <input value={sp.name} onChange={(e) => updateSpecial(sp.id, { name: e.target.value })} className="w-24 bg-transparent text-sm font-semibold outline-none" />
-                  <input type="number" value={sp.required} onChange={(e) => updateSpecial(sp.id, { required: parseInt(e.target.value, 10) || 0 })} className="w-12 border border-slate-300 rounded px-1 py-0.5 text-sm text-center" />
-                  <button onClick={() => removeSpecial(sp.id)} className="text-slate-400 hover:text-rose-500 px-1 font-bold">✕</button>
-                </span>
-              ))}
-              <button onClick={addSpecial} className="text-sm font-bold text-slate-500 hover:bg-slate-100 border border-dashed border-slate-300 rounded-lg px-2 py-1">+ 추가</button>
-            </div>
-          </div>
-        )}
-
-        {/* 탭 + 도구 */}
-        {!printMode && (
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {tabs.map(t => {
-                const active = tab === t.key;
-                const solid = GRADE_META[t.gid]?.solid || 'bg-slate-700';
-                return <button key={t.key} onClick={() => setTab(t.key)} className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${active ? `${solid} text-white shadow` : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}>{t.label}</button>;
-              })}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                <button onClick={undo} disabled={hi <= 0} className="px-2.5 py-1.5 text-base text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="되돌리기 (Ctrl+Z)">↶</button>
-                <button onClick={redo} disabled={hi >= history.length - 1} className="px-2.5 py-1.5 text-base text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="다시실행 (Ctrl+Y)">↷</button>
-              </div>
-              <button onClick={downloadCSV} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-semibold">📊 CSV</button>
-              <button onClick={() => setPrintMode(true)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-semibold">🖨️ 인쇄</button>
-            </div>
-          </div>
-        )}
-
-        {printMode && (
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-bold">2026학년도 2학기 {subject.name} 시수배당표</h2>
-            <button onClick={() => setPrintMode(false)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">편집으로</button>
-          </div>
-        )}
-
-        {/* 안내 한 줄 */}
-        {!printMode && (
-          <p className="text-sm text-slate-500 mb-2">셀을 <b className="text-slate-700">드래그해 범위를 잡고</b> 숫자를 누르면 한 번에 채워져요. · <b className="text-slate-700">방향키</b> 이동 · <b className="text-slate-700">Enter</b> 아래로 · <b className="text-slate-700">Delete</b> 지우기</p>
-        )}
-
-        {/* 표 */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div ref={gridRef} tabIndex={-1} className="overflow-x-auto outline-none">
-            <table className="border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="p-2 text-sm font-bold text-slate-500 sticky left-0 bg-white z-20 border-r border-slate-200 w-32">대구분</th>
-                  {headerGroups.map((g, i) => {
-                    const m = GRADE_META[g.gid];
-                    const label = g.gid === 'ETC' ? '기타시수' : `${m.name} (기본 ${g.req}h)`;
-                    return <th key={i} colSpan={g.span} className={`p-2 text-sm font-bold text-center border-r border-slate-200 ${m.soft} ${m.text}`}>{label}</th>;
-                  })}
-                </tr>
-                <tr className="border-b-2 border-slate-200 bg-white">
-                  <th className="p-2 text-sm font-bold text-slate-500 sticky left-0 bg-white z-20 border-r border-slate-200">담당교사</th>
-                  {visibleColumns.map(c => (
-                    <th key={c.id} className="px-1 py-2 text-center border-r border-slate-100 w-14">
-                      <div className="text-sm font-bold text-slate-700 leading-tight truncate">{c.short}</div>
-                      <div className="text-xs text-slate-400">목표 {c.required}</div>
-                    </th>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-bold text-slate-500">학급 수</span>
+                  {['G1', 'G2', 'G3'].map(g => (
+                    <label key={g} className="flex items-center gap-1"><span className="text-slate-500">{g[1]}</span>
+                      <input type="number" min="1" max="20" value={classCounts[g]} onChange={(e) => setClassCount(g, parseInt(e.target.value, 10))} className={numInput} /></label>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {teachers.map((t, r) => {
-                  const tot = teacherTotal(t.id);
-                  return (
-                    <tr key={t.id} className="border-b border-slate-100">
-                      <td className="p-2 sticky left-0 bg-white z-10 border-r border-slate-200">
-                        <div className="flex items-center gap-1">
-                          <input ref={el => { teacherRefs.current[t.id] = el; }} value={t.name} disabled={printMode}
-                            onChange={(e) => renameTeacher(t.id, e.target.value)} placeholder="이름 입력"
-                            className="select-text flex-1 min-w-0 text-base font-bold text-slate-800 bg-transparent border-b border-slate-200 focus:border-indigo-500 focus:bg-indigo-50 rounded-t px-1 py-0.5 outline-none placeholder-slate-300" />
-                          {!printMode && (
-                            <button onClick={() => setConfirmDel({ id: t.id, name: t.name })}
-                              className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-rose-500 text-sm font-bold transition-colors" title="삭제">✕</button>
-                          )}
-                        </div>
-                        <div className={`mt-1 inline-block px-2 py-0.5 rounded-md text-sm font-bold ${loadColor(tot)}`}>합 {tot}h</div>
-                      </td>
-                      {visibleColumns.map((c, ci) => {
-                        const raw = alloc[t.id]?.[c.id] || 0;
-                        const sx = sel;
-                        let selected = false, active = false;
-                        if (sx) {
-                          const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
-                          const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
-                          selected = r >= r0 && r <= r1 && ci >= c0 && ci <= c1;
-                          active = sx.f.r === r && sx.f.c === ci;
-                        }
+                </div>
+
+                <div className="flex items-center gap-2 text-sm flex-wrap">
+                  <span className="font-bold text-slate-500">기타시수</span>
+                  {(subject.specials || []).map(sp => (
+                    <span key={sp.id} className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-1 py-1">
+                      <input value={sp.name} onChange={(e) => updateSpecial(sp.id, { name: e.target.value })} className="w-24 bg-transparent text-sm font-semibold outline-none" />
+                      <input type="number" value={sp.required} onChange={(e) => updateSpecial(sp.id, { required: parseInt(e.target.value, 10) || 0 })} className="w-12 border border-slate-300 rounded px-1 py-0.5 text-sm text-center" />
+                      <button onClick={() => removeSpecial(sp.id)} className="text-slate-400 hover:text-rose-500 px-1 font-bold">✕</button>
+                    </span>
+                  ))}
+                  <button onClick={addSpecial} className="text-sm font-bold text-slate-500 hover:bg-slate-100 border border-dashed border-slate-300 rounded-lg px-2 py-1">+ 추가</button>
+                </div>
+              </div>
+            )}
+
+            {!printMode && (
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {tabs.map(t => {
+                    const active = tab === t.key;
+                    const solid = GRADE_META[t.gid]?.solid || 'bg-slate-700';
+                    return <button key={t.key} onClick={() => setTab(t.key)} className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${active ? `${solid} text-white shadow` : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}>{t.label}</button>;
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+                    <button onClick={undo} disabled={hi <= 0} className="px-2.5 py-1.5 text-base text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="되돌리기 (Ctrl+Z)">↶</button>
+                    <button onClick={redo} disabled={hi >= history.length - 1} className="px-2.5 py-1.5 text-base text-slate-600 disabled:opacity-30 hover:bg-white rounded font-bold" title="다시실행 (Ctrl+Y)">↷</button>
+                  </div>
+                  <button onClick={downloadCSV} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-semibold">📊 CSV</button>
+                  <button onClick={() => setPrintMode(true)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-semibold">🖨️ 인쇄</button>
+                </div>
+              </div>
+            )}
+
+            {printMode && (
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-bold">2026학년도 2학기 {subject.name} 시수배당표</h2>
+                <button onClick={() => setPrintMode(false)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">편집으로</button>
+              </div>
+            )}
+
+            {!printMode && (
+              <p className="text-sm text-slate-500 mb-2">셀을 <b className="text-slate-700">드래그해 범위를 잡고</b> 숫자를 누르면 한 번에 채워져요. · <b className="text-slate-700">방향키</b> 이동 · <b className="text-slate-700">Enter</b> 아래로 · <b className="text-slate-700">Delete</b> 지우기</p>
+            )}
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div ref={gridRef} tabIndex={-1} className="overflow-x-auto outline-none">
+                <table className="border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="p-2 text-sm font-bold text-slate-500 sticky left-0 bg-white z-20 border-r border-slate-200 w-32">대구분</th>
+                      {headerGroups.map((g, i) => {
+                        const m = GRADE_META[g.gid];
+                        const label = g.gid === 'ETC' ? '기타시수' : `${m.name} (기본 ${g.req}h)`;
+                        return <th key={i} colSpan={g.span} className={`p-2 text-sm font-bold text-center border-r border-slate-200 ${m.soft} ${m.text}`}>{label}</th>;
+                      })}
+                    </tr>
+                    <tr className="border-b-2 border-slate-200 bg-white">
+                      <th className="p-2 text-sm font-bold text-slate-500 sticky left-0 bg-white z-20 border-r border-slate-200">담당교사</th>
+                      {visibleColumns.map(c => (
+                        <th key={c.id} className="px-1 py-2 text-center border-r border-slate-100 w-14">
+                          <div className="text-sm font-bold text-slate-700 leading-tight truncate">{c.short}</div>
+                          <div className="text-xs text-slate-400">목표 {c.required}</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teachers.map((t, r) => {
+                      const tot = teacherTotal(t.id);
+                      return (
+                        <tr key={t.id} className="border-b border-slate-100">
+                          <td className="p-2 sticky left-0 bg-white z-10 border-r border-slate-200">
+                            <div className="flex items-center gap-1">
+                              <input ref={el => { teacherRefs.current[t.id] = el; }} value={t.name} disabled={printMode}
+                                onChange={(e) => renameTeacher(t.id, e.target.value)} placeholder="이름 입력"
+                                className="select-text flex-1 min-w-0 text-base font-bold text-slate-800 bg-transparent border-b border-slate-200 focus:border-indigo-500 focus:bg-indigo-50 rounded-t px-1 py-0.5 outline-none placeholder-slate-300" />
+                              {!printMode && (
+                                <button onClick={() => setConfirmDel({ id: t.id, name: t.name })}
+                                  className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-rose-500 text-sm font-bold transition-colors" title="삭제">✕</button>
+                              )}
+                            </div>
+                            <div className={`mt-1 inline-block px-2 py-0.5 rounded-md text-sm font-bold ${loadColor(tot)}`}>합 {tot}h</div>
+                          </td>
+                          {visibleColumns.map((c, ci) => {
+                            const raw = alloc[t.id]?.[c.id] || 0;
+                            const sx = sel;
+                            let selected = false, active = false;
+                            if (sx) {
+                              const r0 = Math.min(sx.a.r, sx.f.r), r1 = Math.max(sx.a.r, sx.f.r);
+                              const c0 = Math.min(sx.a.c, sx.f.c), c1 = Math.max(sx.a.c, sx.f.c);
+                              selected = r >= r0 && r <= r1 && ci >= c0 && ci <= c1;
+                              active = sx.f.r === r && sx.f.c === ci;
+                            }
+                            return (
+                              <td key={c.id} onMouseDown={(e) => onCellDown(e, r, ci)} onMouseEnter={() => onCellEnter(r, ci)}
+                                className={`relative border-r border-slate-100 w-14 cursor-cell text-center text-lg font-bold py-2 ${cellStyle(raw)} ${active ? 'ring-2 ring-indigo-600 ring-inset z-10' : selected ? 'ring-2 ring-indigo-300 ring-inset' : ''}`}>
+                                {numShow(raw)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                    {!printMode && (
+                      <tr className="border-b border-slate-100">
+                        <td className="p-2 sticky left-0 bg-white z-10 border-r border-slate-200">
+                          <button onClick={addTeacher} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border-2 border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold transition-colors">＋ 교사 추가</button>
+                        </td>
+                        <td colSpan={visibleColumns.length} className="bg-slate-50"></td>
+                      </tr>
+                    )}
+                    <tr className="border-t-2 border-slate-300 bg-slate-50">
+                      <td className="p-2 text-sm font-bold text-slate-700 sticky left-0 bg-slate-100 z-10 border-r border-slate-200">배정 합계</td>
+                      {visibleColumns.map(c => {
+                        const got = colTotal(c.id), diff = got - c.required;
+                        let cls = 'bg-emerald-50 text-emerald-700', mark = '✓';
+                        if (diff < 0) { cls = 'bg-amber-50 text-amber-700'; mark = `${diff}`; }
+                        else if (diff > 0) { cls = 'bg-rose-50 text-rose-700'; mark = `+${diff}`; }
                         return (
-                          <td key={c.id} onMouseDown={(e) => onCellDown(e, r, ci)} onMouseEnter={() => onCellEnter(r, ci)}
-                            className={`relative border-r border-slate-100 w-14 cursor-cell text-center text-lg font-bold py-2 ${cellStyle(raw)} ${active ? 'ring-2 ring-indigo-600 ring-inset z-10' : selected ? 'ring-2 ring-indigo-300 ring-inset' : ''}`}>
-                            {numShow(raw)}
+                          <td key={c.id} className={`px-1 py-2 text-center border-r border-slate-100 ${cls}`}>
+                            <div className="text-base font-bold">{got}</div>
+                            <div className="text-sm font-extrabold">{mark}</div>
                           </td>
                         );
                       })}
                     </tr>
-                  );
-                })}
-                {!printMode && (
-                  <tr className="border-b border-slate-100">
-                    <td className="p-2 sticky left-0 bg-white z-10 border-r border-slate-200">
-                      <button onClick={addTeacher} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border-2 border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold transition-colors">＋ 교사 추가</button>
-                    </td>
-                    <td colSpan={visibleColumns.length} className="bg-slate-50"></td>
-                  </tr>
-                )}
-                <tr className="border-t-2 border-slate-300 bg-slate-50">
-                  <td className="p-2 text-sm font-bold text-slate-700 sticky left-0 bg-slate-100 z-10 border-r border-slate-200">배정 합계</td>
-                  {visibleColumns.map(c => {
-                    const got = colTotal(c.id), diff = got - c.required;
-                    let cls = 'bg-emerald-50 text-emerald-700', mark = '✓';
-                    if (diff < 0) { cls = 'bg-amber-50 text-amber-700'; mark = `${diff}`; }
-                    else if (diff > 0) { cls = 'bg-rose-50 text-rose-700'; mark = `+${diff}`; }
-                    return (
-                      <td key={c.id} className={`px-1 py-2 text-center border-r border-slate-100 ${cls}`}>
-                        <div className="text-base font-bold">{got}</div>
-                        <div className="text-sm font-extrabold">{mark}</div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
-
-      {/* 교사 삭제 확인 */}
-      {confirmDel && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDel(null)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-5 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-3xl mb-2">🗑️</div>
-            <p className="text-base font-bold text-slate-800">{confirmDel.name || '이 교사'}를 삭제할까요?</p>
-            <p className="text-sm text-slate-500 mt-1">배정한 시수도 함께 사라져요.</p>
-            <div className="mt-4 flex gap-2">
-              <button onClick={() => setConfirmDel(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-lg text-sm font-bold">취소</button>
-              <button onClick={() => reallyRemoveTeacher(confirmDel.id)} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-lg text-sm font-bold">삭제</button>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </main>
 
-      {/* 과목 삭제 확인 */}
-      {confirmSubDel && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmSubDel(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-5 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-3xl mb-2">🗑️</div>
-            <p className="text-base font-bold text-slate-800">'{subject.name}' 과목을 삭제할까요?</p>
-            <p className="text-sm text-slate-500 mt-1">이 과목의 배정표 전체가 사라져요.</p>
-            <div className="mt-4 flex gap-2">
-              <button onClick={() => setConfirmSubDel(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-lg text-sm font-bold">취소</button>
-              <button onClick={reallyRemoveSubject} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-lg text-sm font-bold">삭제</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 저장 슬롯 */}
-      {saveOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setSaveOpen(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-base font-bold text-slate-900">저장 / 불러오기</h3>
-              <button onClick={() => setSaveOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
-            </div>
-            <p className="text-xs text-slate-500 mb-3">작업은 자동저장돼서 다시 열면 그대로예요. 슬롯 1~5에는 버전을 따로 보관할 수 있어요.</p>
-            <div className="space-y-2">
-              {slotMetas.map(s => (
-                <div key={s.n} className="flex items-center gap-2 border border-slate-200 rounded-lg p-2">
-                  <div className="flex-1">
-                    <div className="text-sm font-bold text-slate-800">슬롯 {s.n}</div>
-                    <div className="text-xs text-slate-400">{s.savedAt ? s.savedAt : '비어 있음'}</div>
-                  </div>
-                  <button onClick={() => saveSlot(s.n)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-md">저장</button>
-                  <button onClick={() => loadSlot(s.n)} disabled={!s.savedAt} className="bg-white border border-slate-300 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-md disabled:opacity-30">불러오기</button>
-                  <button onClick={() => clearSlot(s.n)} disabled={!s.savedAt} className="text-rose-400 hover:text-rose-600 text-xs font-bold px-1 disabled:opacity-30">비우기</button>
+          {confirmDel && (
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDel(null)}>
+              <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-5 text-center" onClick={(e) => e.stopPropagation()}>
+                <div className="text-3xl mb-2">🗑️</div>
+                <p className="text-base font-bold text-slate-800">{confirmDel.name || '이 교사'}를 삭제할까요?</p>
+                <p className="text-sm text-slate-500 mt-1">배정한 시수도 함께 사라져요.</p>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={() => setConfirmDel(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-lg text-sm font-bold">취소</button>
+                  <button onClick={() => reallyRemoveTeacher(confirmDel.id)} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-lg text-sm font-bold">삭제</button>
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {toast && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-lg z-50">{toast}</div>
-      )}
-    </div>
-  );
-}
+          {confirmSubDel && (
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmSubDel(false)}>
+              <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-5 text-center" onClick={(e) => e.stopPropagation()}>
+                <div className="text-3xl mb-2">🗑️</div>
+                <p className="text-base font-bold text-slate-800">'{subject.name}' 과목을 삭제할까요?</p>
+                <p className="text-sm text-slate-500 mt-1">이 과목의 배정표 전체가 사라져요.</p>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={() => setConfirmSubDel(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-lg text-sm font-bold">취소</button>
+                  <button onClick={reallyRemoveSubject} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-lg text-sm font-bold">삭제</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {saveOpen && (
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setSaveOpen(false)}>
+              <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-base font-bold text-slate-900">저장 / 불러오기</h3>
+                  <button onClick={() => setSaveOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">작업은 자동저장돼서 다시 열면 그대로예요. 슬롯 1~5에는 버전을 따로 보관할 수 있어요.</p>
+                <div className="space-y-2">
+                  {slotMetas.map(s => (
+                    <div key={s.n} className="flex items-center gap-2 border border-slate-200 rounded-lg p-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-bold text-slate-800">슬롯 {s.n}</div>
+                        <div className="text-xs text-slate-400">{s.savedAt ? s.savedAt : '비어 있음'}</div>
+                      </div>
+                      <button onClick={() => saveSlot(s.n)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-md">저장</button>
+                      <button onClick={() => loadSlot(s.n)} disabled={!s.savedAt} className="bg-white border border-slate-300 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-md disabled:opacity-30">불러오기</button>
+                      <button onClick={() => clearSlot(s.n)} disabled={!s.savedAt} className="text-rose-400 hover:text-rose-600 text-xs font-bold px-1 disabled:opacity-30">비우기</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {toast && (
+            <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-lg z-50">{toast}</div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
